@@ -1,10 +1,9 @@
-# SULI 2026 — ML Kaon PID for CLAS12
+# SULI 2026 — ML PID for CLAS12
 
-ML-based kaon particle identification for the `ep → e' p K+ X` exclusive channel using CLAS12 RGA pass-2 data.
+ML-based particle identification for the `ep → e' p K+ X` SIDIS channel using CLAS12 RGA pass-2 data.
 
-**Student:** Cooper (SULI 2026)
+**Student:** Cooper Bell (SULI 2026)
 **PI:** Maria Zurek (ANL)
-**Supervisor:** Fatiha (JLab)
 
 ## What's in this repo
 
@@ -33,4 +32,4 @@ jupyter lab notebooks/
 
 ## Project plan and onboarding
 
-See `notes/` directory (initially populated from `~/CLAS/SULI/notes/` on the PI's local machine).
+See `notes/` directory.
