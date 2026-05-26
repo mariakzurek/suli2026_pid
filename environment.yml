@@ -1,0 +1,16 @@
+name: suli2026_pid
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - numpy
+  - pandas
+  - matplotlib
+  - scikit-learn
+  - uproot
+  - awkward
+  - jupyterlab
+  - pip
+  - pip:
+    - lightgbm
+    - xgboost
