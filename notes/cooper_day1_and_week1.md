@@ -716,7 +716,7 @@ ls -lh /volatile/clas12/<username>/calib_test.root
 ```
 
 If this fails, stop and debug the build environment before going further. Common
-failures: `module load clas12/pro` not done, classpath wrong, Java version mismatch.
+failures: `module load clas12` not done, classpath wrong, Java version mismatch.
 Check `processing.csh` stderr carefully.
 
 **Step 3 — training script:**
