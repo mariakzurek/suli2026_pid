@@ -26,9 +26,15 @@ It works well at low momentum, where pions and kaons have clearly different velo
 at a given momentum. Above roughly 2–2.5 GeV/c, the velocities converge and the FTOF
 cannot reliably separate pi+ from K+. The EB's refinement tool is a variable called
 `chi2pid`: a signed number quantifying how well the measured beta matches the kaon
-hypothesis. The standard cut `|chi2pid| < 3` is the baseline. The problem is that this cut
-leaks pions into the kaon sample — at high momentum, pion contamination in the EB-identified
-K+ sample reaches 30–50%. The numbers are known from two sources: simulation with MC truth
+hypothesis. The standard production cut on this variable is **momentum-dependent** — at low
+momentum (p < 2 GeV/c) it's a symmetric ±3σ window around the kaon-hypothesis mean, but
+above 2 GeV/c the window contracts asymmetrically to handle the worsening pion/kaon
+separation. The Python reference implementation lives in `scripts/baseline_chi2pid.py` in
+the analysis repo. The simpler form `|chi2pid| < 3` is sometimes used as a loose cut for
+orientation but is not the production baseline.
+
+The problem is that even with this cut, pions leak into the kaon sample — at high momentum,
+pion contamination in the EB-identified K+ sample reaches 30–50%. The numbers are known from two sources: simulation with MC truth
 labels, and the RICH detector (a Cherenkov ring imager installed in one sector of the
 Forward Detector), which provides independent PID above ~1.75 GeV/c. Connor Pecar's prior
 work on a dihadron channel (`ep → e' K+ pi- X`) documented all of this carefully. His
@@ -87,14 +93,16 @@ ifarm access compound into lost days.
   - GitHub: `https://github.com/mariakzurek/clas12_analysis_software`
   - SSH clone: `git@github.com:mariakzurek/clas12_analysis_software.git`
   - Working branch: `suli_kaon_pid` (off `rich_studies`)
-  - On ifarm: Cooper clones this and `git checkout suli_kaon_pid`.
+  - Local path (on ifarm): `/work/clas12/<username>/SULI/clas12_analysis_software/`
+    (NOT `/home/` — see Section 4b for clone instructions)
 
 - **Analysis repo** (Maria's, brand new — for all Python notebooks, ML training, plots,
   slurm scripts):
   - GitHub: `https://github.com/mariakzurek/suli2026_pid`
   - SSH clone: `git@github.com:mariakzurek/suli2026_pid.git`
   - Single branch: `main`
-  - On ifarm: Cooper clones this. He commits his work here, NOT in the framework repo.
+  - Local path (on ifarm): `/work/clas12/<username>/SULI/suli2026_pid/`
+  - He commits his work here, NOT in the framework repo.
 
 | What | Path |
 |---|---|
@@ -114,14 +122,14 @@ come back when you need them.
 
 ### 4a. Python for this project
 
-You need five things: `uproot` (ROOT → pandas), `pandas` (tabular data), `numpy`
-(arrays), `matplotlib` (plots), and `scikit-learn` (ML). Install via conda:
+For Week 1, you don't need to install anything — use JLab JupyterHub (see Section 4f).
+The default Python kernel on JupyterHub has `numpy`, `pandas`, `matplotlib`,
+`scikit-learn`, and `uproot` pre-installed. The only package missing is `lightgbm`,
+which you install once in a notebook cell with `!pip install --user lightgbm`.
 
-```bash
-conda create -n clas12ml python=3.11 uproot pandas numpy matplotlib scikit-learn \
-    -c conda-forge lightgbm
-conda activate clas12ml
-```
+For Week 2 and beyond — when you start running batch jobs or want a reproducible Python
+environment for slurm submissions — set up a conda environment from
+`suli2026_pid/environment.yml`. See Section 4f for that step (not needed Week 1).
 
 **Reading a ROOT TTree into a DataFrame:**
 
@@ -271,15 +279,41 @@ pasted the full line and saved it.
 
 ---
 
-There are two repos. Clone both on your first day on ifarm:
+There are two repos. Clone both on your first day on ifarm.
+
+**Important — clone into `/work/`, not `/home/`.** The framework repo contains a
+committed Python virtualenv (`python_env/`, ~327 MB) that you do not need. Use
+sparse-checkout to skip it — this drops the working tree from ~330 MB to ~10 MB and
+avoids filling your quota. The clone commands below assume your `/work/` allocation path
+is `/work/clas12/<username>/` (confirm the exact path with `ls /work/clas12/` first —
+your username is your CUE username). Your `/home/` quota on ifarm is small;
+the `/work/` filesystem is persistent and has a real quota for project files.
+
+> Why `python_env/`? Someone accidentally committed a virtualenv to the upstream
+> framework repo. We skip it; the Python environment for this project is built fresh
+> from `suli2026_pid/environment.yml` (see Section 4f).
 
 ```bash
-# 1. Framework repo — clone directly onto the working branch
-git clone -b suli_kaon_pid git@github.com:mariakzurek/clas12_analysis_software.git
+# Always work under /work/, not /home/ — your /home/ quota is small.
+cd /work/clas12/<username>/      # confirm this path with `ls /work/clas12/` first
+mkdir -p SULI && cd SULI
 
-# 2. Analysis repo — single branch, plain clone
+# 1. Framework repo — sparse-checkout to skip the 327 MB python_env directory
+git clone --no-checkout -b suli_kaon_pid \
+    git@github.com:mariakzurek/clas12_analysis_software.git
+cd clas12_analysis_software
+git sparse-checkout init --no-cone
+git sparse-checkout set '/*' '!/python_env'
+git checkout suli_kaon_pid
+cd ..
+
+# 2. Analysis repo — small, plain clone
 git clone git@github.com:mariakzurek/suli2026_pid.git
 ```
+
+If `git clone` fails with "No space left on device", check your quotas: `quota -s` for
+`/home/`, `df -h /work/clas12/` for `/work/`. The clone should be on `/work/`, not
+`/home/`.
 
 **Framework repo (`clas12_analysis_software`) rules:**
 
@@ -367,7 +401,7 @@ scancel <JOBID>          # cancel a job
 #SBATCH --output=/volatile/clas12/<username>/logs/pid_test_%j.out
 
 module load clas12
-cd ~/SULI/clas12_analysis_software
+cd /work/clas12/<username>/SULI/clas12_analysis_software
 
 ./processing.csh \
     processing_scripts/processing_mc_pid_training.groovy \
@@ -523,12 +557,13 @@ plots, and it is what we will use for almost all Python work in this project.
 **URL and login.** Go to `https://jupyterhub.jlab.org` and sign in with the same CUE
 credentials you use for ifarm SSH (the username and password you got from JLab IT). After
 login, JupyterHub will ask you to choose a server profile. The default profile usually
-works fine; if you see a "CLAS12" or "Physics" option, pick that one. Click "Start" and
-wait 30–60 seconds for the server to spawn — it only takes this long the first time.
+works fine. Click "Start" and wait 30–60 seconds for the server to spawn — it only takes this long the first time.
 
 **What you see after login.** A file browser opens on the left side showing your home
 directory on ifarm (`/home/<username>/`). Navigate to wherever you cloned `suli2026_pid`
-— for example `~/CLAS/suli2026_pid/notebooks/`. To create a new notebook, click
+— on ifarm that will be
+`/work/clas12/<username>/SULI/suli2026_pid/notebooks/` (not a `~/` path; see Section 4b).
+To create a new notebook, click
 **"New"** → **"Notebook"** and pick a **Python 3** kernel. The environment already has
 `uproot`, `pandas`, `numpy`, `matplotlib`, and `scikit-learn` available by default
 because the JupyterHub server mounts the CLAS12 Python stack. If `lightgbm` is missing,
@@ -563,6 +598,18 @@ across sessions.
 direct access to `/work/clas12/<username>/` and `/volatile/clas12/<username>/` — you
 can open ROOT files from those paths in a notebook cell the same way you would from
 an interactive shell. You do not need to copy files to your laptop.
+
+**Optional: conda environment for batch jobs (Week 2+)**
+
+When you start submitting batch jobs to slurm — which won't have JupyterHub's
+pre-installed kernel — you'll want a reproducible Python environment. The `suli2026_pid`
+repo has an `environment.yml` for exactly this:
+
+```bash
+cd /work/clas12/<username>/SULI/suli2026_pid
+conda env create -f environment.yml
+conda activate suli2026_pid
+```
 
 ---
 
@@ -622,10 +669,9 @@ file end-to-end as a build-chain validation. If that succeeds, run
 
 **Step 1 — clone:**
 
-```bash
-git clone -b suli_kaon_pid git@github.com:mariakzurek/clas12_analysis_software.git
-git clone git@github.com:mariakzurek/suli2026_pid.git
-```
+Follow the sparse-checkout instructions in Section 4b ("Clone both repos") — clone into
+`/work/clas12/<username>/SULI/`, not your `/home/`. The framework repo requires
+sparse-checkout to skip `python_env/` (~327 MB); the analysis repo is a plain clone.
 
 **Step 2 — calibration script (build-chain smoke test):**
 
