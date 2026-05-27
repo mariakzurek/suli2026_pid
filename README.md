@@ -22,13 +22,23 @@ That repo runs on ifarm to produce the training/analysis ntuples that this repo 
 
 ## Quick start
 
+**For interactive notebook work** (recommended for Week 1):
+1. Log in to JLab JupyterHub at `https://jupyterhub.jlab.org` with your CUE credentials
+2. Navigate to `/work/clas12/<username>/SULI/suli2026_pid/notebooks/`
+3. Open or create a notebook with the Python 3 kernel
+4. The default kernel has numpy, pandas, matplotlib, scikit-learn, uproot pre-installed
+5. For `lightgbm`: run `!pip install --user lightgbm` once in a notebook cell
+
+**For batch jobs** (Week 2+):
 ```bash
-# On ifarm, after the ntuple is produced:
-git clone git@github.com:mariakzurek/suli2026_pid.git
-cd suli2026_pid
-conda env create -f environment.yml    # or pip install -r requirements.txt
-jupyter lab notebooks/
+# Set up the conda env (one-time, see notes/cooper_day1_and_week1.md Section 4f for full instructions)
+conda env create -f environment.yml
+conda activate suli2026_pid
 ```
+
+The conda env contains numpy, pandas, matplotlib, scikit-learn, uproot, awkward, lightgbm, xgboost — runtime libraries only. No jupyterlab (use JupyterHub for notebooks).
+
+See `notes/cooper_day1_and_week1.md` for the full onboarding doc.
 
 ## Project plan and onboarding
 

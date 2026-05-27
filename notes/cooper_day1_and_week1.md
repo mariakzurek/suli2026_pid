@@ -603,13 +603,42 @@ an interactive shell. You do not need to copy files to your laptop.
 
 When you start submitting batch jobs to slurm — which won't have JupyterHub's
 pre-installed kernel — you'll want a reproducible Python environment. The `suli2026_pid`
-repo has an `environment.yml` for exactly this:
+repo has an `environment.yml` for exactly this.
+
+**Before creating the env, redirect conda's package cache to `/work/`.** Conda's default
+is `~/.conda/pkgs/`, which lives on your small `/home/` quota and will fill up after a
+single env install. Do this ONCE per ifarm account:
+
+```bash
+# Create /work/-based directories for conda
+mkdir -p /work/clas12/<username>/conda/pkgs
+mkdir -p /work/clas12/<username>/conda/envs
+
+# Tell conda to use them
+conda config --add pkgs_dirs /work/clas12/<username>/conda/pkgs
+conda config --add envs_dirs /work/clas12/<username>/conda/envs
+
+# Verify
+conda config --show pkgs_dirs envs_dirs
+```
+
+Then create and activate the env:
 
 ```bash
 cd /work/clas12/<username>/SULI/suli2026_pid
 conda env create -f environment.yml
 conda activate suli2026_pid
 ```
+
+Confirm conda is available first: `which conda` (or try `module load anaconda` if it's
+not in your PATH). The env contains numpy, pandas, matplotlib, scikit-learn, uproot,
+awkward, lightgbm, xgboost — runtime libraries only, no jupyterlab (use JLab JupyterHub
+for notebooks). **You do not need this in Week 1** — only set it up when you start
+writing slurm submission scripts (~Week 2-3).
+
+If you hit 'No space left on device' during install, your `~/.conda/pkgs/` is full from
+a previous failed attempt — clean it with `rm -rf ~/.conda/pkgs/*` and rerun after
+confirming the `pkgs_dirs` redirect above is in place.
 
 ---
 

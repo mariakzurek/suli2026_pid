@@ -1,3 +1,8 @@
+# Environment for batch-job execution (slurm) on ifarm.
+# Interactive notebook work is done via JLab JupyterHub (https://jupyterhub.jlab.org),
+# which has its own pre-installed jupyter stack — do NOT install jupyterlab here.
+# This env contains only the runtime libraries needed for training/evaluation scripts.
+
 name: suli2026_pid
 channels:
   - conda-forge
@@ -9,7 +14,6 @@ dependencies:
   - scikit-learn
   - uproot
   - awkward
-  - jupyterlab
   - pip
   - pip:
     - lightgbm
