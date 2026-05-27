@@ -36,11 +36,7 @@ orientation but is not the production baseline.
 The problem is that even with this cut, pions leak into the kaon sample — at high momentum,
 pion contamination in the EB-identified K+ sample reaches 30–50%. The numbers are known from two sources: simulation with MC truth
 labels, and the RICH detector (a Cherenkov ring imager installed in one sector of the
-Forward Detector), which provides independent PID above ~1.75 GeV/c. Connor Pecar's prior
-work on a dihadron channel (`ep → e' K+ pi- X`) documented all of this carefully. His
-analysis note's Section 8 (limitations) is the clearest statement of why the problem is
-not fully solved yet; `connor_method_summary.md` in the notes directory distills the
-relevant parts.
+Forward Detector), which provides independent PID above ~1.75 GeV/c. 
 
 ### 2.2 What ML can do about it
 
@@ -59,7 +55,7 @@ separate them without ever using the truth label at inference time.
 End to end: the training data pipeline (running the Groovy script on the clasdis files,
 converting to ROOT, loading into Python), the model training and comparison (BDT first,
 then a small neural net as a second model family), the validation against MC truth, the
-cross-check against actual RGA pass-2 data using the Simone method (`ep → e h+ (n)`
+cross-check against actual RGA pass-2 data using the exclusive missing-mass method (`ep → e h+ (n)`
 neutron-tagged) plus RICH where it has coverage, and the headline number — "at this kaon
 efficiency, the ML reduces pion contamination from X% to Y% in the `ep → e' p K+ X`
 analysis." The final products are a calibrated model file, a code repository that
@@ -529,7 +525,7 @@ This produces `pid_training_test.txt` (space-separated) and then automatically r
 | 1–12 | Event-level: `runnum, evnum, helicity, e_p, e_theta, e_phi, vz_e, Q2, W, x, y, nu` |
 | 13–19 | Per-track kinematics: `pid, p, theta, phi, vz, sector, status` |
 | 20–34 | ML features (`beta`, `chi2pid`, `nphe_htcc`, FTOF panels 1A/1B {energy, time, path}, ECAL ECin/ECout {energy, time, path}) |
-| 35–40 | PCAL + FTOF layer 2 (Connor dropped; Cooper re-evaluates): `pcal_energy, pcal_time, pcal_path, ftof_energy_2, ftof_time_2, ftof_path_2` |
+| 35–40 | PCAL + FTOF layer 2: `pcal_energy, pcal_time, pcal_path, ftof_energy_2, ftof_time_2, ftof_path_2` |
 | 41–54 | RICH (cross-check only, NOT training features): `rich_emilay, rich_emico, rich_emqua, rich_best_PID, rich_RQ, rich_ReQ, rich_el_logl, rich_pi_logl, rich_k_logl, rich_pr_logl, rich_best_ch, rich_best_c2, rich_best_RL, rich_best_ntot` |
 | 55–57 | MC truth: `mc_matching_pid, mc_parent_pid, mc_match_quality` |
 
