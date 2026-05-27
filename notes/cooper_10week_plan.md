@@ -289,45 +289,45 @@ Tasks 3 and 4 slide into Week 2 without blocking the overall schedule.
 
 ---
 
-### Week 8 — Simone method: full implementation, MC validation, first contamination numbers
+### Week 8 — Exclusive missing-mass method: full implementation, MC validation, first contamination numbers
 
-**Theme.** Implement the Simone data-driven method end-to-end. Validate it against MC truth. Produce the first data-side contamination table.
+**Theme.** Implement the exclusive missing-mass data-driven method end-to-end. Validate it against MC truth. Produce the first data-side contamination table.
 
 **Cooper's tasks.**
-- Pull the RGA pass-2 data ntuples for the Simone sample (`ep → e h+ X`, neutron-tagged). Paths confirmed with Maria; if not yet on hand, use MC-only Simone as described in the fallback below.
-- **Full Simone implementation.** Produce the M_X(e h+) spectrum for h+ = (EB-pi+, EB-K+, EB-p) separately, in all (p, theta) bins. Identify the neutron peak at M_X ≈ 0.94 GeV. Sideband-subtract (signal window: 0.85–1.05 GeV; sidebands: 0.55–0.75 and 1.15–1.35 GeV). Count events under the neutron peak with EB-K+ ID; divide by total under-peak count = pi-to-K mis-ID rate per bin. Tabulate `C_Simone(p, theta)` for all bins.
-- **MC validation of the Simone method.** Apply the identical procedure to MC. Compare `C_Simone^MC(p, theta)` to `C_MC_truth(p, theta)`. Plot the ratio per bin. This is the method closure test: if Simone recovers MC truth on MC, it is trustworthy on data.
-- **First contamination numbers.** Compare `C_Simone(p, theta)` (data) to `C_MC_truth(p, theta)` (MC). Plot side by side with error bars. If they agree within stated systematics, that's the primary result. If not, investigate and document honestly.
-- Begin drafting the report section "Data-driven validation" — describe the Simone method, present the closure test, present the data results.
+- Pull the RGA pass-2 data ntuples for the neutron-tagged sample (`ep → e h+ X`, neutron-tagged). Paths confirmed with Maria; if not yet on hand, use MC-only missing-mass method as described in the fallback below.
+- **Full missing-mass method implementation.** Produce the M_X(e h+) spectrum for h+ = (EB-pi+, EB-K+, EB-p) separately, in all (p, theta) bins. Identify the neutron peak at M_X ≈ 0.94 GeV. Sideband-subtract (signal window: 0.85–1.05 GeV; sidebands: 0.55–0.75 and 1.15–1.35 GeV). Count events under the neutron peak with EB-K+ ID; divide by total under-peak count = pi-to-K mis-ID rate per bin. Tabulate `C_miss_mass(p, theta)` for all bins.
+- **MC validation of the missing-mass method.** Apply the identical procedure to MC. Compare `C_miss_mass^MC(p, theta)` to `C_MC_truth(p, theta)`. Plot the ratio per bin. This is the method closure test: if the missing-mass method recovers MC truth on MC, it is trustworthy on data.
+- **First contamination numbers.** Compare `C_miss_mass(p, theta)` (data) to `C_MC_truth(p, theta)` (MC). Plot side by side with error bars. If they agree within stated systematics, that's the primary result. If not, investigate and document honestly.
+- Begin drafting the report section "Data-driven validation" — describe the exclusive missing-mass method, present the closure test, present the data results.
 
 **Maria's tasks.**
-- Review Simone closure-test plot. Sanity check: neutron peak should be well-resolved; closure ratio should be ≈1 within errors.
-- Decide whether to escalate to Simone Vallarino (if external) for sanity check on method details.
+- Review missing-mass method closure-test plot. Sanity check: neutron peak should be well-resolved; closure ratio should be ≈1 within errors.
+- Decide whether to consult with the method's originators for sanity check on method details.
 - Mid-week meeting on the first contamination numbers.
 
 **Done when.**
-- Simone contamination table complete for all (p, theta) bins, in CSV (`C_simone_data.csv`).
-- MC closure plot for the Simone method in `/figures/simone_closure.png`.
-- Simone-data vs MC-truth comparison plot in `/figures/simone_vs_mc_truth.png`.
+- Missing-mass method contamination table complete for all (p, theta) bins, in CSV (`C_miss_mass_data.csv`).
+- MC closure plot for the missing-mass method in `/figures/miss_mass_closure.png`.
+- Missing-mass vs MC-truth comparison plot in `/figures/miss_mass_vs_mc_truth.png`.
 
 **Risks / dependencies.**
-- Data ntuples not yet produced or not on Cooper's path. Severity H if not resolved. Mitigation: use MC-only Simone (apply the method to MC; check closure against MC truth). Validates the method even before data is ready.
-- Simone and MC-truth disagree by >2σ in many bins. Severity M-H. Mitigation: this is real physics. Investigate: does the data have a contamination the MC doesn't capture? Is the neutron-peak sideband subtraction biased? Document the discrepancy honestly; do not paper over it.
+- Data ntuples not yet produced or not on Cooper's path. Severity H if not resolved. Mitigation: use MC-only missing-mass method (apply the method to MC; check closure against MC truth). Validates the method even before data is ready.
+- Missing-mass method and MC-truth disagree by >2σ in many bins. Severity M-H. Mitigation: this is real physics. Investigate: does the data have a contamination the MC doesn't capture? Is the neutron-peak sideband subtraction biased? Document the discrepancy honestly; do not paper over it.
 - The pi-to-K mis-ID rate is dominated by combinatoric background, not real mis-ID. Severity M. Mitigation: the sideband subtraction handles this; verify the sideband regions are genuinely background-only by checking the M_X shape.
 
-**Fallback / scope-down.** If data ntuples are unavailable, MC-only Simone (closure test only) is the deliverable for the week. The data result moves to Week 9.
+**Fallback / scope-down.** If data ntuples are unavailable, MC-only missing-mass method (closure test only) is the deliverable for the week. The data result moves to Week 9.
 
 ---
 
-### Week 9 — ML applied to Simone sample on data; ML-vs-baseline contamination plot; report and poster drafts
+### Week 9 — ML applied to neutron-tagged sample on data; ML-vs-baseline contamination plot; report and poster drafts
 
-**Theme.** Apply the final ML model to the data-side Simone sample. Produce the definitive ML-vs-baseline comparison. Draft the full report and poster.
+**Theme.** Apply the final ML model to the data-side neutron-tagged sample. Produce the definitive ML-vs-baseline comparison. Draft the full report and poster.
 
 **Cooper's tasks.**
-- **Apply final ML classifier to the Simone sample on data.** For each event in the Simone sample, run `model_final` on the K+ candidate. Apply the per-(p, theta)-bin threshold. Compare `C_ML(p, theta)` to `C_baseline(p, theta)` and `C_Simone(p, theta)`. This is the primary result: ML reduces contamination in data, measured by an independent data-driven method.
-- **ML-vs-baseline contamination plot.** Per (p, theta) bin: plot {baseline, ML, Simone} contamination with error bars. This is the headline figure for the poster. Make it publication-quality.
+- **Apply final ML classifier to the neutron-tagged sample on data.** For each event in the neutron-tagged sample, run `model_final` on the K+ candidate. Apply the per-(p, theta)-bin threshold. Compare `C_ML(p, theta)` to `C_baseline(p, theta)` and `C_miss_mass(p, theta)`. This is the primary result: ML reduces contamination in data, measured by an independent data-driven method.
+- **ML-vs-baseline contamination plot.** Per (p, theta) bin: plot {baseline, ML, missing-mass method} contamination with error bars. This is the headline figure for the poster. Make it publication-quality.
 - **RICH cross-check (where coverage exists).** In the RICH acceptance (`p > 1.75 GeV, theta < 20°`, sector 4): select `ep → e pi+ X` with the pi+ RICH-tagged (`best_PID == 211`, `RQ > 0.2`, `N_photons > 3`). The fraction with EB-K+ ID gives an independent contamination estimate. Overlay RICH cross-check points on the comparison plot for the bins where they exist. This is a cross-check, not a standalone method — a handful of bins is sufficient.
-- **Report draft.** Full pass on the ~10-page written report. Sections: (1) introduction and channel; (2) baseline and ML pipeline; (3) MC-truth comparison; (4) data-driven validation (Simone method, RICH cross-check); (5) systematic uncertainties; (6) conclusion and headline number.
+- **Report draft.** Full pass on the ~10-page written report. Sections: (1) introduction and channel; (2) baseline and ML pipeline; (3) MC-truth comparison; (4) data-driven validation (exclusive missing-mass method, RICH cross-check); (5) systematic uncertainties; (6) conclusion and headline number.
 - **Poster draft.** Take the report's figures and tables, lay them out for the SULI poster format. First pass.
 
 **Maria's tasks.**
@@ -336,15 +336,15 @@ Tasks 3 and 4 slide into Week 2 without blocking the overall schedule.
 - Review poster draft Friday. Return comments by Sunday.
 
 **Done when.**
-- ML-vs-baseline contamination plot (with Simone and RICH cross-check) in `/figures/contam_ml_vs_baseline.png`.
+- ML-vs-baseline contamination plot (with missing-mass method and RICH cross-check) in `/figures/contam_ml_vs_baseline.png`.
 - Report draft v1 in `/report/report_v1.md`.
 - Poster draft v1.
 
 **Risks / dependencies.**
-- ML-vs-Simone disagree in some bins. Severity M. Mitigation: report honestly. If the ML reduces contamination relative to baseline but Simone and MC-truth disagree on the absolute level, that is a systematic uncertainty, not a failure. Quote the spread.
+- ML-vs-missing-mass method disagree in some bins. Severity M. Mitigation: report honestly. If the ML reduces contamination relative to baseline but the missing-mass method and MC-truth disagree on the absolute level, that is a systematic uncertainty, not a failure. Quote the spread.
 - RICH coverage is narrow (sector 4, limited p-theta bins). Severity L (expected). Mitigation: present what's available. RICH is a cross-check, not the primary result.
 
-**Fallback / scope-down.** If the RICH cross-check is incomplete by Wednesday, drop it. Simone + MC-truth + ML is sufficient for the report and poster.
+**Fallback / scope-down.** If the RICH cross-check is incomplete by Wednesday, drop it. Missing-mass method + MC-truth + ML is sufficient for the report and poster.
 
 ---
 
@@ -398,8 +398,8 @@ Tasks 3 and 4 slide into Week 2 without blocking the overall schedule.
 |---|---|---|---|---|
 | R1 | `RICH::Particle` bank empty on clasdis MC | H | Cooper verifies Day 2 with `hipo-utils -dump`. If empty, RICH cross-check moves from MC to data-only; the 14 RICH variables are not in the MC training ntuple (no big loss, they're not in features anyway). | Drop RICH as a sanity comparison on MC. RICH still used on data as a cross-check in Week 9 where sector-4 coverage exists. |
 | R2 | Cooper's ifarm access delayed | H | Maria pushes JLab IT pre-arrival. Backup laptop environment with local copy of one HIPO file for offline work. | Cooper does Python and reading work in Week 1, full pipeline catches up Week 2. |
-| R3 | Training MC statistics insufficient at high p (>3 GeV) where contamination is worst | M-H | Use full Stefan Diehl `clasdis` inbending sample (293M events). Quote MC stat uncertainty per bin. | If high-p bins are still stat-limited, merge bins. Honest binning at the cost of resolution. |
-| R4 | Simone and MC-truth disagree beyond systematics | M | Investigate honestly: does the data have a contamination the MC doesn't capture? Is the sideband subtraction biased? | The disagreement is a finding. Report it. Quote it as a systematic uncertainty rather than papering over it. |
+| R3 | Training MC statistics insufficient at high p (>3 GeV) where contamination is worst | M-H | Use full `clasdis` inbending sample. Quote MC stat uncertainty per bin. | If high-p bins are still stat-limited, merge bins. Honest binning at the cost of resolution. |
+| R4 | Missing-mass method and MC-truth disagree beyond systematics | M | Investigate honestly: does the data have a contamination the MC doesn't capture? Is the sideband subtraction biased? | The disagreement is a finding. Report it. Quote it as a systematic uncertainty rather than papering over it. |
 | R5 | MLP underperforms or takes too long | M | Keep architecture small (2 × 64). If still too slow, use a GPU node or sklearn MLPClassifier. | Drop MLP. BDT alone is enough for the report. |
 | R6 | `processing_three_particles` extension for per-hadron ToF/calo not done in time | M | Decide D4 in Week 3. If postponed, use existing 3-particle ntuple without ToF/calo for analysis-channel evaluation; apply ML using the training-MC features only (which are per-track, indexed by REC::Particle row). | Do the analysis using only the training-ntuple features; analysis-channel ntuple becomes an event-selection helper only, not a per-hadron PID input. |
 | R7 | Cooper underwater on Python in first 2 weeks | M | Pair-code Day 4-5. Sklearn reading is non-negotiable Week 2-3. Maria checks in mid-week. | Reduce Week 4-5 model-training ambition; lean on Maria for sklearn pipeline construction in Week 4. |
@@ -414,9 +414,9 @@ If behind schedule at Week 5, drop in this order:
 2. **Drop isotonic calibration**, keep only Platt (sigmoid) calibration. (Saves ~1 day.)
 3. **Drop per-(p, theta)-bin threshold optimization.** Use a single global threshold chosen on the validation set. (Saves ~2 days in Week 5.)
 4. **Drop the analysis-channel ntuple extension for ToF/calo per-hadron variables** if not done by Week 6. Use existing `processing_mc_three_particles.groovy` output without ToF/calo per-hadron features. Apply the ML classifier to candidate K+ tracks using their kinematics + a join back to the training ntuple's per-track features.
-5. **Drop the hyperon-tagged kaon-truth cross-channel** (whichever was picked in D3). Rely on MC truth + Simone for the kaon-truth side.
+5. **Drop the hyperon-tagged kaon-truth cross-channel** (whichever was picked in D3). Rely on MC truth + missing-mass method for the kaon-truth side.
 6. **Drop feature ablation studies.** Keep hyperparameter tuning only. Feature importance plot alone is sufficient for the report.
-7. **Drop the RICH cross-check in Week 9.** Simone + MC-truth + ML is the complete story.
+7. **Drop the RICH cross-check in Week 9.** Missing-mass method + MC-truth + ML is the complete story.
 
 Do not drop: the headline improvement number, the report, the poster. These are the contractual SULI deliverables.
 
@@ -429,4 +429,4 @@ Do not drop: the headline improvement number, the report, the poster. These are 
 - **MC truth matching.** Geometric: `|delta phi| < 6°, |delta theta| < 2°`. Same as Connor. Tracks with no MC match within this window are dropped from the training set (they cannot have a truth label).
 - **Energy-loss and momentum corrections.** Applied at the groovy level via `analysis_fitter` infrastructure for electrons; not applied for K+ (Hayward's code has no kaon corrections; this is a known limitation common to cut-based and ML approaches equally).
 - **Reproducibility.** All sklearn fits with `random_state=42`. All split file lists committed to repo. All slurm submission scripts committed. README must explain how to go from clean checkout to trained model in one command.
-- **Honesty.** If a measurement disagrees with another, say so. Simone and MC-truth are independent by construction: if they disagree, that is part of the result, not a problem to paper over.
+- **Honesty.** If a measurement disagrees with another, say so. The missing-mass method and MC-truth are independent by construction: if they disagree, that is part of the result, not a problem to paper over.
