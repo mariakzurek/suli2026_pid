@@ -76,7 +76,7 @@ ifarm access compound into lost days.
 - [ ] `hipo-utils` is in `PATH` after loading the module (check with `which hipo-utils`)
 - [ ] Jupyter accessible on ifarm or locally — whichever you prefer for Python work, https://jupyterhub.jlab.org
 - [ ] GitHub: confirm you can read and push to the framework fork  
-      `https://github.com/mariakzurek/clas12_analysis_software` (branch: `suli_kaon_pid`)  
+      `https://github.com/mariakzurek/clas12_analysis_software` (branch: `suli_kaon_pid_main`)  
       and to the analysis repo `https://github.com/mariakzurek/suli2026_pid` (branch: `main`)
 - [ ] Slack / email channel for the group  
 
@@ -88,7 +88,8 @@ ifarm access compound into lost days.
   pipeline that produces ntuples from HIPO files):
   - GitHub: `https://github.com/mariakzurek/clas12_analysis_software`
   - SSH clone: `git@github.com:mariakzurek/clas12_analysis_software.git`
-  - Working branch: `suli_kaon_pid` (off `rich_studies`)
+  - Working branch: `suli_kaon_pid_main` (based on Timothy Hayward's `main`)
+  - **Note on branch history:** The working branch is `suli_kaon_pid_main`, rebased onto Timothy's current `main`. An earlier branch `suli_kaon_pid` (based on the `rich_studies` branch) is still on the fork as a backup but is stale — do not use it. To pull in future Timothy updates: `git fetch upstream && git merge upstream/main` from this branch.
   - Local path (on ifarm): `/work/clas12/<username>/SULI/clas12_analysis_software/`
     (NOT `/home/` — see Section 4b for clone instructions)
 
@@ -295,12 +296,12 @@ cd /work/clas12/<username>/      # confirm this path with `ls /work/clas12/` fir
 mkdir -p SULI && cd SULI
 
 # 1. Framework repo — sparse-checkout to skip the 327 MB python_env directory
-git clone --no-checkout -b suli_kaon_pid \
+git clone --no-checkout -b suli_kaon_pid_main \
     git@github.com:mariakzurek/clas12_analysis_software.git
 cd clas12_analysis_software
 git sparse-checkout init --no-cone
 git sparse-checkout set '/*' '!/python_env'
-git checkout suli_kaon_pid
+git checkout suli_kaon_pid_main
 cd ..
 
 # 2. Analysis repo — small, plain clone
@@ -311,9 +312,60 @@ If `git clone` fails with "No space left on device", check your quotas: `quota -
 `/home/`, `df -h /work/clas12/` for `/work/`. The clone should be on `/work/`, not
 `/home/`.
 
+---
+
+**ifarm gotcha: coatjava bundled-Java mismatch**
+
+The repo includes a `coatjava/` directory bundled by the framework author. On ifarm, this bundled coatjava may use an older Groovy that fails to parse the project's jar (compiled with Java 21). Symptom: when you run a groovy script via `processing.csh`, you see `BUG! exception in phase 'semantic analysis' ... Unsupported class file major version 65`.
+
+Fix (one-time per ifarm clone): replace the local bundled `coatjava` with a symlink to the cvmfs system installation:
+
+```bash
+cd /work/clas12/<username>/SULI/clas12_analysis_software
+mv coatjava coatjava.bundled
+ln -s /cvmfs/oasis.opensciencegrid.org/jlab/hallb/clas12/sw/noarch/coatjava/13.5.2 coatjava
+ls -la coatjava   # confirm it points at cvmfs
+```
+
+Then `processing.csh` will use the cvmfs run-groovy and the jar will load correctly. The bundled coatjava is preserved as `coatjava.bundled` in case you need it.
+
+---
+
+**ifarm gotcha: run processing.csh from the repo root**
+
+`processing.csh` uses relative paths internally (notably `source source_file.txt`). It must be run from the repo root, NOT from inside `processing_scripts/`. Wrong:
+
+```bash
+cd processing_scripts
+./processing.csh ...   # fails: 'source_file.txt: No such file'
+```
+
+Correct:
+
+```bash
+cd /work/clas12/<username>/SULI/clas12_analysis_software
+./processing_scripts/processing.csh processing_scripts/<your_groovy> ...
+```
+
+---
+
+**ifarm gotcha: deactivate conda before running the framework**
+
+If you have the `suli2026_pid` conda env activated (your prompt shows `(suli2026_pid)`), deactivate it before running `processing.csh`. The conda env's Python/Java environment can interfere with the CLAS12 module's. Run framework jobs in a clean shell:
+
+```bash
+conda deactivate
+module load clas12/pro
+./processing_scripts/processing.csh ...
+```
+
+The conda env is for Python/ML work only — never both in the same shell.
+
+---
+
 **Framework repo (`clas12_analysis_software`) rules:**
 
-The rule: **never commit directly to `suli_kaon_pid`**. Create a feature branch off it,
+The rule: **never commit directly to `suli_kaon_pid_main`**. Create a feature branch off it,
 do your work there, push, and ask Maria to review before merge.
 
 ```bash
@@ -324,7 +376,7 @@ git status
 git log --oneline -10
 
 # Always pull the base branch before starting new work
-git pull origin suli_kaon_pid
+git pull origin suli_kaon_pid_main
 
 # Create a branch for a specific task (name it descriptively)
 git checkout -b cooper-week1-env-check
@@ -335,7 +387,7 @@ git commit -m "week1: describe what you did"
 git push origin cooper-week1-env-check
 ```
 
-Then open a pull request on GitHub targeting `suli_kaon_pid` and let Maria know.
+Then open a pull request on GitHub targeting `suli_kaon_pid_main` and let Maria know.
 
 **Analysis repo (`suli2026_pid`) rules:**
 
@@ -537,7 +589,7 @@ that misses the PCAL is different from a pion that misses it.
 **For deeper framework questions:** `framework_analysis.md` in the notes directory is a
 complete deep-read of the repository. The most relevant sections:
 - §2.5 — the `getIndex()` index-alignment bug and why the new script avoids it
-- §5b — deep read of `processing_calibration.groovy` (the template the new script was built from)
+- §5b — deep read of `processing_calibration.groovy` (historical reference; the template our `processing_mc_pid_training.groovy` was originally forked from, but the script itself is no longer used in this project)
 - §8.1 — the open question about RICH bank presence in MC HIPO files (which you will
   answer on Day 1/2)
 
@@ -688,9 +740,7 @@ rows. Share the snippet with Maria via Slack.
 
 ### Task 3 — Clone repos; run both Groovy scripts on one file; open output in Python (~half day; second project day)
 
-**What:** Clone both repos. Run `processing_calibration.groovy` on ONE small clasdis
-file end-to-end as a build-chain validation. If that succeeds, run
-`processing_mc_pid_training.groovy` on the same file and load the result into Python.
+**What:** Clone both repos. Run `processing_mc_pid_training.groovy` on ONE small clasdis file end-to-end (see Step 2 below).
 
 **Step 1 — clone:**
 
@@ -698,22 +748,27 @@ Follow the sparse-checkout instructions in Section 4b ("Clone both repos") — c
 `/work/clas12/<username>/SULI/`, not your `/home/`. The framework repo requires
 sparse-checkout to skip `python_env/` (~327 MB); the analysis repo is a plain clone.
 
-**Step 2 — calibration script (build-chain smoke test):**
+**Step 2 — run the ML PID training script on ONE HIPO file (smoke test + first data):**
 
 ```bash
-cd clas12_analysis_software
-./processing.csh \
-    processing_scripts/processing_calibration.groovy \
-    /path/to/clasdis/one_file_directory/ \
-    /volatile/clas12/<username>/calib_test \
-    1
+cd /work/clas12/<username>/SULI/clas12_analysis_software
 
-ls -lh /volatile/clas12/<username>/calib_test.root
+./processing_scripts/processing.csh \
+    processing_scripts/processing_mc_pid_training.groovy \
+    /work/clas12/<username>/clasdis_rich_on \
+    /volatile/clas12/<username>/SULI/pid_training_test \
+    1 10.6041 11
 ```
 
-If this fails, stop and debug the build environment before going further. Common
-failures: `module load clas12` not done, classpath wrong, Java version mismatch.
-Check `processing.csh` stderr carefully.
+Arguments: script, hipo_dir, output_basename, n_files=1, beam_E=10.6041, runnum_override=11 (MC).
+
+This produces `pid_training_test.txt` (groovy step) and `pid_training_test.root` (converter step). On success, the script prints the column-index map at the end. Confirm the ROOT file exists:
+
+```bash
+ls -lh /volatile/clas12/<username>/SULI/pid_training_test.root
+```
+
+If you hit the "Unsupported class file major version 65" error, apply the coatjava symlink fix from the gotchas above before retrying. If you hit "source_file.txt: No such file", you ran the command from inside `processing_scripts/` instead of the repo root — go back to the repo root and retry.
 
 **Step 3 — training script:**
 
