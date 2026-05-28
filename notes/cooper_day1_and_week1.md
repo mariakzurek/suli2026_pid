@@ -121,8 +121,16 @@ come back when you need them.
 
 For Week 1, you don't need to install anything — use JLab JupyterHub (see Section 4f).
 The default Python kernel on JupyterHub has `numpy`, `pandas`, `matplotlib`,
-`scikit-learn`, and `uproot` pre-installed. The only package missing is `lightgbm`,
-which you install once in a notebook cell with `!pip install --user lightgbm`.
+and `scikit-learn` pre-installed. You'll need to install `uproot` (for reading ROOT
+files), `awkward` (uproot dependency), and `lightgbm` (for the BDT classifier) once
+in a notebook cell:
+
+```python
+!pip install --user uproot awkward lightgbm
+```
+
+That cell only needs to run once; the packages install into your user directory and
+persist across sessions.
 
 For Week 2 and beyond — when you start running batch jobs or want a reproducible Python
 environment for slurm submissions — set up a conda environment from
@@ -136,7 +144,7 @@ import pandas as pd
 
 tree = uproot.open("pid_training_one_file.root:PhysicsEvents")
 df = tree.arrays(library="pd")   # returns a pandas DataFrame
-print(df.shape)                  # (n_rows, 57)
+print(df.shape)                  # (n_rows, 53)
 print(df.dtypes)
 print(df.head())
 ```
@@ -523,7 +531,7 @@ HIPO file
     → processing_*.groovy     (Groovy event loop — reads banks, applies cuts, writes txt)
     → Java fitter layer       (GenericKinematicFitter subclass: applies PID cuts, corrections)
     → Java analyzer layer     (TwoParticles / ThreeParticles: computes kinematics, RICH lookup)
-    → space-separated .txt    (one row per track or per event, ~57-98 columns)
+    → space-separated .txt    (one row per track or per event, ~53-98 columns)
     → convert_txt_to_root.cpp (C++ program: reads txt, creates TTree "PhysicsEvents" in .root)
 ```
 
@@ -544,7 +552,7 @@ HIPO file
   directly from HIPO banks: `REC::Scintillator` (FTOF), `REC::Calorimeter` (ECAL/PCAL),
   `REC::Cherenkov` (HTCC), `RICH::Particle`.
 - Geometrically matches each track to `MC::Lund` truth (|Δφ|<6°, |Δθ|<2°, best match wins).
-- Writes **57 columns** per track row. Column map printed at the end of every run.
+- Writes **53 columns** per track row. Column map printed at the end of every run.
 
 **How to invoke it:**
 
@@ -570,16 +578,20 @@ This produces `pid_training_test.txt` (space-separated) and then automatically r
 `convert_txt_to_root` to produce `pid_training_test.root` with a TTree named
 `PhysicsEvents`.
 
-**The 57 columns, by group:**
+**The 53 columns, by group:**
 
 | Columns | Group |
 |---|---|
-| 1–12 | Event-level: `runnum, evnum, helicity, e_p, e_theta, e_phi, vz_e, Q2, W, x, y, nu` |
-| 13–19 | Per-track kinematics: `pid, p, theta, phi, vz, sector, status` |
-| 20–34 | ML features (`beta`, `chi2pid`, `nphe_htcc`, FTOF panels 1A/1B {energy, time, path}, ECAL ECin/ECout {energy, time, path}) |
-| 35–40 | PCAL + FTOF layer 2: `pcal_energy, pcal_time, pcal_path, ftof_energy_2, ftof_time_2, ftof_path_2` |
-| 41–54 | RICH (cross-check only, NOT training features): `rich_emilay, rich_emico, rich_emqua, rich_best_PID, rich_RQ, rich_ReQ, rich_el_logl, rich_pi_logl, rich_k_logl, rich_pr_logl, rich_best_ch, rich_best_c2, rich_best_RL, rich_best_ntot` |
-| 55–57 | MC truth: `mc_matching_pid, mc_parent_pid, mc_match_quality` |
+| 1–3   | Event ID: `runnum, evnum, helicity` |
+| 4–8   | DIS kinematics: `Q2, W, x, y, nu` |
+| 9–15  | Per-track kinematics: `pid` (EB), `p, theta, phi, vz, sector, status` |
+| 16–17 | Per-track raw EB inputs: `beta, chi2pid` |
+| 18–23 | FTOF panels 1A/1B: `ftof_energy_1A, ftof_energy_1B, ftof_time_1A, ftof_time_1B, ftof_path_1A, ftof_path_1B` |
+| 24–29 | ECAL inner/outer: `ecin_energy, ecout_energy, ecin_time, ecout_time, ecin_path, ecout_path` |
+| 30    | HTCC: `nphe_htcc` |
+| 31–36 | PCAL + FTOF layer 2 (Connor dropped these; we include for re-evaluation): `pcal_energy, pcal_time, pcal_path, ftof_energy_2, ftof_time_2, ftof_path_2` |
+| 37–50 | RICH 14-var (cross-check only, NOT in training features): `rich_emilay, rich_emico, rich_emqua, rich_best_PID, rich_RQ, rich_ReQ, rich_el_logl, rich_pi_logl, rich_k_logl, rich_pr_logl, rich_best_ch, rich_best_c2, rich_best_RL, rich_best_ntot` |
+| 51–53 | MC truth: `mc_matching_pid, mc_parent_pid, mc_match_quality` |
 
 **Missing-value sentinel:** `-9999` means the variable was absent for that track (no RICH
 hit, no PCAL deposit, no MC match, etc.). You will need to handle these in the ML
@@ -612,13 +624,13 @@ directory on ifarm (`/home/<username>/`). Navigate to wherever you cloned `suli2
 — on ifarm that will be
 `/work/clas12/<username>/SULI/suli2026_pid/notebooks/` (not a `~/` path; see Section 4b).
 To create a new notebook, click
-**"New"** → **"Notebook"** and pick a **Python 3** kernel. The environment already has
-`uproot`, `pandas`, `numpy`, `matplotlib`, and `scikit-learn` available by default
-because the JupyterHub server mounts the CLAS12 Python stack. If `lightgbm` is missing,
-install it in a notebook cell:
+**"New"** → **"Notebook"** and pick a **Python 3** kernel. The default Python kernel has `numpy`, `pandas`, `matplotlib`, and `scikit-learn`
+available by default. You'll need to install `uproot` (for reading ROOT files),
+`awkward` (uproot dependency), and `lightgbm` (for the BDT classifier) in a notebook
+cell:
 
 ```python
-!pip install --user lightgbm
+!pip install --user uproot awkward lightgbm
 ```
 
 You only need to run that cell once; it installs into your user directory and persists
@@ -786,15 +798,70 @@ The script prints the column index map at the end. Note any columns that look su
 **Step 4 — open in Python:**
 
 ```python
-import uproot, pandas as pd
+import uproot
+import pandas as pd
 
-df = uproot.open("/volatile/clas12/<username>/pid_training_test.root:PhysicsEvents") \
-           .arrays(library="pd")
+# ─────────────────────────────────────────────────────────────────────
+# Load the training ntuple into a pandas DataFrame.
+# Each row is one FD π±/K± track passing the script's filters.
+# Columns are documented in the script's startup banner (53 total) and
+# in the column-map table in Section 4e.
+# ─────────────────────────────────────────────────────────────────────
+df = uproot.open(
+    "/volatile/clas12/<username>/SULI/pid_training_test.root:PhysicsEvents"
+).arrays(library="pd")
 
-print(df.shape)                              # should be (N_tracks, 57)
-print(df.head())
-print(df.describe())
-print(df["mc_matching_pid"].value_counts())  # key: how many K+, pi+, p, unmatched?
+# Basic sanity check: how many tracks, how many features?
+# Expect ~1-2 million rows from one HIPO file, exactly 53 columns.
+print("Shape:", df.shape)
+
+# ─────────────────────────────────────────────────────────────────────
+# What did the Event Builder reconstruct each track as?
+# Column "pid" is the EB-assigned PDG code, filtered by the script to
+# {211, -211, 321, -321} (π+, π-, K+, K-).
+# ─────────────────────────────────────────────────────────────────────
+print("\nEB-assigned PID counts:")
+print(df["pid"].value_counts())
+
+# ─────────────────────────────────────────────────────────────────────
+# What was the MC truth identity of those same tracks?
+# Column "mc_matching_pid" is the PDG code of the MC particle that
+# geometrically matched the reconstructed track (|Δφ| < 6°, |Δθ| < 2°).
+# -9999 means no MC particle matched (rare, <5%).
+# Many entries will be non-pion/non-kaon truths — protons, photons,
+# decay products of ρ⁰/ω/η, etc. — that EB mis-identified as a pion/kaon.
+# ─────────────────────────────────────────────────────────────────────
+print("\nMC-truth PID (top 15):")
+print(df["mc_matching_pid"].value_counts().head(15))
+print(f"\nUnmatched tracks (no MC match): {(df['mc_matching_pid'] == -9999).sum()}")
+
+# ─────────────────────────────────────────────────────────────────────
+# THE KEY DIAGNOSTIC for this project — the contamination matrix.
+# Rows = what EB called the track. Columns = what it actually was.
+# Off-diagonal entries are the misidentifications ML must learn to fix.
+# For Cooper's project the most important row is EB pid=321 (EB-K+):
+# how many of those are really K+ (diagonal) vs π+ contaminating (off-diagonal)?
+# ─────────────────────────────────────────────────────────────────────
+# Show only the most common truth species to keep the table readable
+top_truths = df["mc_matching_pid"].value_counts().head(8).index
+contam = pd.crosstab(
+    df["pid"],
+    df["mc_matching_pid"].where(df["mc_matching_pid"].isin(top_truths), other="other"),
+    margins=True,
+)
+print("\nContamination matrix (EB pid × MC-truth pid):")
+print(contam)
+
+# ─────────────────────────────────────────────────────────────────────
+# Quick sanity stats on key training features.
+# - beta:    should be roughly [0.5, 1.0]. Values > 1 are reco artifacts.
+# - chi2pid: should mostly be in [-5, +5]. Sentinel 9999 = EB couldn't compute it.
+# - rich_RQ: -9999 means no RICH hit (most tracks — RICH covers one sector only).
+# ─────────────────────────────────────────────────────────────────────
+print("\nKey feature stats:")
+print(df[["beta", "chi2pid", "rich_RQ"]].describe())
+print(f"chi2pid sentinels (9999): {(df['chi2pid'] == 9999).sum()}")
+print(f"Tracks with RICH hit (rich_RQ != -9999): {(df['rich_RQ'] != -9999).sum()}")
 ```
 
 If the ROOT file is empty (zero rows), check the txt file first:
@@ -802,7 +869,7 @@ If the ROOT file is empty (zero rows), check the txt file first:
 ROOT file is empty, the issue is in `convert_txt_to_root`. If both are empty, check
 whether the HIPO file had events passing the electron cut.
 
-**Done when:** You have a DataFrame on screen with `df.shape[1] == 57` and
+**Done when:** You have a DataFrame on screen with `df.shape[1] == 53` and
 `df["mc_matching_pid"].value_counts()` showing at least some rows with PID 321 (K+) and
 211 (pi+).
 
