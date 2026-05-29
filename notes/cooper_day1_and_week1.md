@@ -322,20 +322,25 @@ If `git clone` fails with "No space left on device", check your quotas: `quota -
 
 ---
 
-**ifarm gotcha: coatjava bundled-Java mismatch**
+**ifarm gotcha: load the clas12 module first**
 
-The repo includes a `coatjava/` directory bundled by the framework author. On ifarm, this bundled coatjava may use an older Groovy that fails to parse the project's jar (compiled with Java 21). Symptom: when you run a groovy script via `processing.csh`, you see `BUG! exception in phase 'semantic analysis' ... Unsupported class file major version 65`.
-
-Fix (one-time per ifarm clone): replace the local bundled `coatjava` with a symlink to the cvmfs system installation:
+Before running `processing.csh` in any new shell, you MUST set up the CLAS12 module environment:
 
 ```bash
-cd /work/clas12/<username>/SULI/clas12_analysis_software
-mv coatjava coatjava.bundled
-ln -s /cvmfs/oasis.opensciencegrid.org/jlab/hallb/clas12/sw/noarch/coatjava/13.5.2 coatjava
-ls -la coatjava   # confirm it points at cvmfs
+module use /scigroup/cvmfs/hallb/clas12/sw/modulefiles
+module use /cvmfs/oasis.opensciencegrid.org/jlab/hallb/clas12/sw/modulefiles
+module load clas12
 ```
 
-Then `processing.csh` will use the cvmfs run-groovy and the jar will load correctly. The bundled coatjava is preserved as `coatjava.bundled` in case you need it.
+This loads `jdk/21.0.2`, `groovy/4.0.20`, `root/6.36.04`, `coatjava/13.5.2`, and the rest of the CLAS12 software stack from cvmfs. Without it, `processing.csh` will fail with cryptic Java/Groovy errors.
+
+If you see the error `Could not initialize class java.util.logging.LogManager`, also create your JVM scratch directory:
+
+```bash
+mkdir -p /scratch/$USER/tmpfs
+```
+
+JLab forces `_JAVA_OPTIONS` to write temp files there, and the JVM crashes if the directory doesn't exist.
 
 ---
 
@@ -368,6 +373,24 @@ module load clas12/pro
 ```
 
 The conda env is for Python/ML work only — never both in the same shell.
+
+---
+
+**ifarm gotcha: do NOT symlink coatjava/**
+
+The repo includes a `coatjava/` directory. **Leave it as-is** — do NOT symlink it to the cvmfs `coatjava/13.5.2`. The bundled directory contains a customized `run-groovy` wrapper from Timothy Hayward that adds the project's processing-classes JAR to the classpath. The cvmfs `run-groovy` is vanilla and doesn't know about the project JAR, so groovy imports fail with 'unable to resolve class extended_kinematic_fitters.analysis_fitter' if you symlink.
+
+If you accidentally already symlinked it:
+
+```bash
+cd /work/clas12/$USER/SULI/clas12_analysis_software
+ls -la coatjava                # if output starts with lrwxrwxrwx, it's a broken symlink
+rm coatjava                    # remove the symlink
+git checkout HEAD -- coatjava  # restore the bundled directory from git
+ls -la coatjava                # should now start with drwxr-xr-x
+```
+
+The right setup is: bundled `coatjava/` (Timothy's wrapper) + `module load clas12` (cvmfs JDK + Groovy). The wrapper picks up the loaded JDK/Groovy versions automatically via `$PATH`.
 
 ---
 
@@ -780,7 +803,7 @@ This produces `pid_training_test.txt` (groovy step) and `pid_training_test.root`
 ls -lh /volatile/clas12/<username>/SULI/pid_training_test.root
 ```
 
-If you hit the "Unsupported class file major version 65" error, apply the coatjava symlink fix from the gotchas above before retrying. If you hit "source_file.txt: No such file", you ran the command from inside `processing_scripts/` instead of the repo root — go back to the repo root and retry.
+If you hit the "Unsupported class file major version 65" error, confirm that you ran `module load clas12` before invoking the script (see the gotcha above). If you hit "source_file.txt: No such file", you ran the command from inside `processing_scripts/` instead of the repo root — go back to the repo root and retry.
 
 **Step 3 — training script:**
 
