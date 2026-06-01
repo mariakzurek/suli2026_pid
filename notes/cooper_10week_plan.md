@@ -106,33 +106,80 @@ Tasks 3 and 4 slide into Week 2 without blocking the overall schedule.
   like in the plots; (3) anything broken or surprising; (4) at least 3 specific
   questions for Maria. Send to Maria by EOD Friday of Week 2.
 - Scale up `processing_mc_pid_training.groovy` to a larger `clasdis` sample (10-20 files, or whatever runs in <2 hours on ifarm interactive). Stage output on `/volatile/`.
-- Write a Python script `compute_baseline.py` that:
+
+**Step 2a — Define PID metrics using Marco Mirazita's convention.**
+
+All efficiency / purity / contamination / mis-ID numbers in this project use the
+definitions from M. Mirazita's SIDIS meeting talk (2026-04-21, see
+`notes/2026-04-21_SidisMeeting_PID-studies.extracted.md` slide 2). Cooper must
+use these notations consistently in plots, tables, the report, and the poster.
+For our K+ analysis:
+
+- **Purity of K+ sample**: `P^K = N(K→K) / Σ_i N(i→K)`
+  — fraction of EB-ID'd K+ that are truly K+
+- **Contamination of K+ by species i**: `C^{i→K} = N(i→K) / Σ_k N(k→K)`
+  — fraction of EB-ID'd K+ that are species i (π+, p, etc.)
+  Closure: `P^K + Σ_i C^{i→K} = 1`
+- **K+ efficiency**: `ε^K = N(K→K) / Σ_j N(K→j)`
+  — fraction of true K+ correctly ID'd as K+
+- **K+ mis-ID to species j**: `M^{K→j} = N(K→j) / Σ_k N(K→k)`
+  — fraction of true K+ wrongly ID'd as species j (π+, p, etc.)
+  Closure: `ε^K + Σ_j M^{K→j} = 1`
+
+Key convention: purity/contamination normalize to DETECTED counts and depend on
+the π:K:p production rate (use them when reporting on a sample composition).
+Efficiency/mis-ID normalize to TRUE counts and depend only on the detector (use
+them when characterizing detector or classifier performance).
+
+The matrix `N(i→j)` is what `processing_mc_pid_training.groovy` produces.
+Compute it in Python via `pd.crosstab(df["mc_matching_pid"], df["pid"])`, where
+rows are true species and columns are EB-assigned species (`pid` is the EB-assigned PID, column 9 of the ntuple). All four metrics above
+are derived from this one table. Keep the raw crosstab in every results CSV so
+that the numbers are always reproducible.
+
+**Step 2b — Baseline contamination measurement with formal metrics.**
+
+Write a Python script `compute_baseline.py` that:
   - Reads the training ntuple.
   - Applies the baseline cut: EB pid == 321 AND `passes_kplus_chi2pid_cut(chi2pid, p)` AND `1.0 < p < 5.0` AND FD-only AND fiducial flags pass.
-  - For each (p, theta) bin (start with 8 p-bins from 1.0 to 5.0 GeV, 2 theta sub-bins per p-bin — confirm grid with Maria), reports:
-    - N(EB=K+, truth K+), N(EB=K+, truth pi+), N(EB=K+, truth p), N(EB=K+, truth other)
-    - Efficiency = N(EB=K+, truth K+) / N(reco track with truth K+ and passes fiducial)
-    - Contamination C(pi -> K) = N(EB=K+, truth pi+) / N(EB=K+, any truth)
-- Produce the canonical 2D plot: contamination vs (p, theta) for the baseline.
-- **Measure K→π contamination in MC:** for each (p, theta) bin, count true K+ tracks split by EB pid assignment. Tabulate the fraction the Event Builder labels as π+ (`K_to_pi_rate(p, theta)`). Plot the K→π rate as a 2D map. This answers whether the EB-π+ sample contains a recoverable population of true kaons; the rate measurement determines whether kaon recovery is worth attempting. Record results in `notes/kpi_contamination.md` and flag to Maria by end of week.
-- Audit the training ntuple features (columns 20–40): confirm column names, units, fraction of tracks with hit, plot 1D distributions per truth class.
+  - For each (p, theta) bin (start with 8 p-bins from 1.0 to 5.0 GeV, 2 theta sub-bins per p-bin — confirm grid with Maria), reports the full N(i→K) count matrix and the derived metrics:
+    - `N(K→K)`, `N(π→K)`, `N(p→K)` — raw counts (numerators for purity and contamination)
+    - `P^K` (purity), `C^{π→K}` (pion contamination), `C^{p→K}` (proton contamination) — ratios to detected K+ count
+    - `ε^K` (kaon efficiency), `M^{K→π}` (kaon mis-ID to π+), `M^{K→p}` (kaon mis-ID to p) — ratios to true K+ count
+- Produce the plots Marco prescribes for K+ (slides 8, 19, 20, adapted from his π+ results):
+  - **2D maps in (p, theta):** `N(π→K)`, `N(K→K)`, `N(p→K)` (raw count maps); then `C^{π→K}`, `P^K`, `C^{p→K}` (purity/contamination maps); then `ε^K`, `M^{K→π}`, `M^{K→p}` (efficiency/mis-ID maps). Nine panels total — follow Marco's 3×3 layout from slides 8 and 19/20.
+  - **1D plots vs P at fixed theta** (following slides 10–13): at two representative theta slices (e.g., ~9° and ~25°), plot `P^K`, `C^{π→K}`, `C^{p→K}` vs P in one panel row, and `ε^K`, `M^{K→π}`, `M^{K→p}` vs P in a second panel row. These are the key diagnostic plots for the report and poster.
+
+**Step 2c — Data/MC variable-agreement audit.**
+
+The PI's standing requirement: *"if MC and data variables disagree, we cannot use them for ML."* Before any ML training begins, audit every feature in the training ntuple against the RGA pass-2 data distribution for the EB-K+ subsample:
+  - For each feature (columns 20–40): overlay the MC (EB-K+ tracks) and data (EB-K+ tracks) 1D distributions. Flag any feature where the MC and data shapes differ visually or by a KS-test p-value < 0.05.
+  - Features with confirmed MC/data agreement go on the **approved feature list** for ML training.
+  - Features with disagreement are flagged in `notes/feature_audit.md` with a description of the discrepancy; they are excluded from ML training until understood.
+  - Confirm column names, units, and hit-fractions (fraction of tracks with a non-missing value) per truth class in MC and per the data EB-K+ sample.
+  - Save overlaid distribution plots to `/figures/feature_audit/`.
+
+- **Measure K→π mis-ID in MC:** for each (p, theta) bin, compute `M^{K→π}` = fraction of true K+ tracks the Event Builder labels as π+. This is the kaon-recovery diagnostic: a large `M^{K→π}` means the EB-π+ sample contains a recoverable population of true kaons. Plot as a 2D map in (p, theta). Record results in `notes/kpi_contamination.md` and flag to Maria by end of week.
 - Read scikit-learn user guide §1.10 (decision trees) and §1.11 (ensemble methods). One page of notes per section in `/notes/sklearn_reading.md`.
 
 **Maria's tasks.**
-- Mid-week meeting (30 min) to review the baseline contamination numbers. Sanity-check Cooper's numbers against prior work and physical intuition.
+- Mid-week meeting (30 min) to review the baseline contamination numbers using Marco's notation (`P^K`, `C^{π→K}`, `C^{p→K}`, `ε^K`, `M^{K→π}`). Sanity-check against prior work and physical intuition; compare Cooper's `C^{π→K}` and `ε^K` numbers to Marco's π+ results where applicable.
 - Confirm bin edges in (p, theta) Cooper should use. Decide now if a non-default grid is wanted.
-- Review the feature audit. Flag any feature that looks broken (all zeros, all -9999, wrong units).
+- Review the feature audit (Step 2c). Decide which flagged features are excluded from ML training. Any feature where MC/data shapes disagree goes on the exclusion list immediately — do not defer this decision to Week 4.
 - Read Cooper's 1-page written summary by EOD Friday; send written feedback before Week 3.
 
 **Done when.**
-- `baseline_contamination_table.csv` with one row per (p, theta) bin, columns {p_low, p_high, theta_low, theta_high, N_K_true, N_pi_true, eff, contam, eff_err, contam_err}.
-- One contamination-vs-(p, theta) plot in `/figures/baseline_contam.png`.
-- Training-ntuple feature audit complete: columns 20–40 confirmed present, units verified, hit-fraction tabulated.
+- `baseline_contamination_table.csv` with one row per (p, theta) bin, columns {p_low, p_high, theta_low, theta_high, N_KtoK, N_pitoK, N_ptoK, P_K, C_pitoK, C_ptoK, eps_K, M_Ktopi, M_Ktop, and corresponding statistical uncertainties}, using Marco's notation throughout.
+- Nine-panel 2D map figure (N-counts, purity/contamination, efficiency/mis-ID) committed to `/figures/baseline_2d_maps.png`.
+- Two-row 1D-vs-P figure at two theta slices committed to `/figures/baseline_1d_vs_p.png`.
+- Feature audit complete: MC/data distribution overlays for all columns 20–40 in `/figures/feature_audit/`; approved and flagged feature lists in `notes/feature_audit.md`.
+- `M^{K→π}` 2D map in `/figures/kpi_misid_map.png`; results documented in `notes/kpi_contamination.md`.
 - 1-page written summary `week1_summary.md` written and sent to Maria.
 
 **Risks / dependencies.**
 - ntuple statistics insufficient at high p. Severity M. Mitigation: scale up the file list early in the week; do not wait until Friday.
 - Column names in the ntuple don't match variable names used in prior notes or literature. Severity L. Mitigation: write a `feature_map.py` that translates once for all downstream code.
+- Data/MC feature disagreement affects many variables (Step 2c). Severity M. Mitigation: run the audit early in the week so flagged features are identified before any ML training begins. A reduced feature set still yields a valid classifier.
 
 **Fallback / scope-down.** If the feature audit reveals broken features (e.g. FTOF time always zero), table the broken features and proceed with whichever subset is correct. Do not block on fixing the groovy script in Week 2; come back to it in Week 3 if needed.
 
