@@ -107,13 +107,12 @@ Tasks 3 and 4 slide into Week 2 without blocking the overall schedule.
   questions for Maria. Send to Maria by EOD Friday of Week 2.
 - Scale up `processing_mc_pid_training.groovy` to a larger `clasdis` sample (10-20 files, or whatever runs in <2 hours on ifarm interactive). Stage output on `/volatile/`.
 
-**Step 2a — Define PID metrics using Marco Mirazita's convention.**
+**Step 2a — Define PID metrics.**
 
-All efficiency / purity / contamination / mis-ID numbers in this project use the
-definitions from M. Mirazita's SIDIS meeting talk (2026-04-21, see
-`notes/2026-04-21_SidisMeeting_PID-studies.extracted.md` slide 2). Cooper must
-use these notations consistently in plots, tables, the report, and the poster.
-For our K+ analysis:
+We use the same efficiency / purity / contamination / mis-ID conventions as the
+SIDIS group standard (see `notes/2026-04-21_SidisMeeting_PID-studies.extracted.md`
+for definitions and notation). Cooper must apply these consistently in plots,
+tables, the report, and the poster. For our K+ analysis:
 
 - **Purity of K+ sample**: `P^K = N(K→K) / Σ_i N(i→K)`
   — fraction of EB-ID'd K+ that are truly K+
@@ -146,40 +145,67 @@ Write a Python script `compute_baseline.py` that:
     - `N(K→K)`, `N(π→K)`, `N(p→K)` — raw counts (numerators for purity and contamination)
     - `P^K` (purity), `C^{π→K}` (pion contamination), `C^{p→K}` (proton contamination) — ratios to detected K+ count
     - `ε^K` (kaon efficiency), `M^{K→π}` (kaon mis-ID to π+), `M^{K→p}` (kaon mis-ID to p) — ratios to true K+ count
-- Produce the plots Marco prescribes for K+ (slides 8, 19, 20, adapted from his π+ results):
-  - **2D maps in (p, theta):** `N(π→K)`, `N(K→K)`, `N(p→K)` (raw count maps); then `C^{π→K}`, `P^K`, `C^{p→K}` (purity/contamination maps); then `ε^K`, `M^{K→π}`, `M^{K→p}` (efficiency/mis-ID maps). Nine panels total — follow Marco's 3×3 layout from slides 8 and 19/20.
-  - **1D plots vs P at fixed theta** (following slides 10–13): at two representative theta slices (e.g., ~9° and ~25°), plot `P^K`, `C^{π→K}`, `C^{p→K}` vs P in one panel row, and `ε^K`, `M^{K→π}`, `M^{K→p}` vs P in a second panel row. These are the key diagnostic plots for the report and poster.
+- Produce the following diagnostic figures for K+:
+  - **2D maps in (p, theta):** `N(π→K)`, `N(K→K)`, `N(p→K)` (raw count maps); then `C^{π→K}`, `P^K`, `C^{p→K}` (purity/contamination maps); then `ε^K`, `M^{K→π}`, `M^{K→p}` (efficiency/mis-ID maps). Nine panels in a 3×3 layout.
+  - **1D plots vs p at fixed theta:** at two representative theta slices (e.g., ~9° and ~25°), plot `P^K`, `C^{π→K}`, `C^{p→K}` vs p in one panel row, and `ε^K`, `M^{K→π}`, `M^{K→p}` vs p in a second panel row. These are the key diagnostic plots for the report and poster.
 
 **Step 2c — Data/MC variable-agreement audit.**
 
-The PI's standing requirement: *"if MC and data variables disagree, we cannot use them for ML."* Before any ML training begins, audit every feature in the training ntuple against the RGA pass-2 data distribution for the EB-K+ subsample:
-  - For each feature (columns 20–40): overlay the MC (EB-K+ tracks) and data (EB-K+ tracks) 1D distributions. Flag any feature where the MC and data shapes differ visually or by a KS-test p-value < 0.05.
-  - Features with confirmed MC/data agreement go on the **approved feature list** for ML training.
-  - Features with disagreement are flagged in `notes/feature_audit.md` with a description of the discrepancy; they are excluded from ML training until understood.
-  - Confirm column names, units, and hit-fractions (fraction of tracks with a non-missing value) per truth class in MC and per the data EB-K+ sample.
-  - Save overlaid distribution plots to `/figures/feature_audit/`.
+The PI's standing requirement: *"if MC and data variables disagree, we cannot use them for ML."* Before any ML training begins, audit every relevant variable in the training ntuple against the RGA pass-2 data distribution for the EB-K+ subsample. Do the comparison in coarse (p, θ) slices — use 9 cells: p in [1, 2], [2, 3], [3, 5] GeV crossed with θ in [5°, 15°], [15°, 25°], [25°, 35°]. In each cell, overlay MC (EB-K+ tracks) and data (EB-K+ tracks) 1D distributions. Flag any variable where KS distance > 0.05 or the shapes disagree visually.
+
+The per-variable decision is: **KEEP** (use in training), **CANDIDATE** (evaluate further before including), or **DROP** (exclude from training until understood).
+
+**Group 1 — Kinematics** (compare distributions even though these are not ML training features — required for the reweighting decision, Step 2d below):
+  - `p` (col 10), `theta` (col 11), `phi` (col 12), `vz` (col 13), `sector` (col 14)
+
+**Group 2 — ML training features** (these MUST agree well; if MC/data disagree, the feature is excluded from training):
+  - `beta` (col 16), `chi2pid` (col 17)
+  - `ftof_energy_1A` (col 18), `ftof_energy_1B` (col 19)
+  - `ftof_time_1A` (col 20), `ftof_time_1B` (col 21)
+  - `ftof_path_1A` (col 22), `ftof_path_1B` (col 23)
+  - `ecin_energy` (col 24), `ecout_energy` (col 25)
+  - `ecin_time` (col 26), `ecout_time` (col 27)
+  - `ecin_path` (col 28), `ecout_path` (col 29)
+  - `nphe_htcc` (col 30)
+
+**Group 3 — Candidate additional features** (Connor dropped these; Cooper evaluates whether they agree well enough to include):
+  - `pcal_energy` (col 31), `pcal_time` (col 32), `pcal_path` (col 33)
+  - `ftof_energy_2` (col 34), `ftof_time_2` (col 35), `ftof_path_2` (col 36)
+
+For each variable, confirm the hit-fraction (fraction of tracks with a non-missing/-9999 value) in MC and in data. Save all overlaid distribution plots to `/figures/feature_audit/`. Summarize the per-feature KEEP / CANDIDATE / DROP decision table in `notes/feature_audit.md`.
+
+**Step 2d — (p, θ) data/MC comparison for the reweighting decision.**
+
+Even though `p` and `theta` are not ML training features, comparing their 2D distributions between MC and data is critical for Task 3 (Connor's reweighting). Connor's reweighting computes 2D data/MC ratios in (p, θ) bins and reweights MC events to match data; before deciding whether to use that approach, we need to know whether the distributions actually differ and by how much.
+
+Cooper must:
+  - Plot the 2D (p, θ) distribution for MC (EB-K+ tracks) and for data (EB-K+ tracks) side by side, using the same binning as the analysis grid.
+  - Plot the ratio map data/MC in (p, θ).
+  - Write a one-paragraph interpretation: if the ratio map is roughly flat (data/MC ≈ 1 everywhere), no reweighting is needed. If it varies significantly across (p, θ) space, reweighting is warranted and should be implemented in Week 4.
+  - Save figures to `/figures/feature_audit/ptheta_data_mc_ratio.png`. Document the interpretation in `notes/feature_audit.md`.
 
 - **Measure K→π mis-ID in MC:** for each (p, theta) bin, compute `M^{K→π}` = fraction of true K+ tracks the Event Builder labels as π+. This is the kaon-recovery diagnostic: a large `M^{K→π}` means the EB-π+ sample contains a recoverable population of true kaons. Plot as a 2D map in (p, theta). Record results in `notes/kpi_contamination.md` and flag to Maria by end of week.
 - Read scikit-learn user guide §1.10 (decision trees) and §1.11 (ensemble methods). One page of notes per section in `/notes/sklearn_reading.md`.
 
 **Maria's tasks.**
-- Mid-week meeting (30 min) to review the baseline contamination numbers using Marco's notation (`P^K`, `C^{π→K}`, `C^{p→K}`, `ε^K`, `M^{K→π}`). Sanity-check against prior work and physical intuition; compare Cooper's `C^{π→K}` and `ε^K` numbers to Marco's π+ results where applicable.
+- Mid-week meeting (30 min) to review the baseline contamination numbers (`P^K`, `C^{π→K}`, `C^{p→K}`, `ε^K`, `M^{K→π}`). Sanity-check against prior work and physical intuition.
 - Confirm bin edges in (p, theta) Cooper should use. Decide now if a non-default grid is wanted.
-- Review the feature audit (Step 2c). Decide which flagged features are excluded from ML training. Any feature where MC/data shapes disagree goes on the exclusion list immediately — do not defer this decision to Week 4.
+- Review the feature audit (Steps 2c and 2d). Decide which flagged features are excluded from ML training and whether the (p, θ) ratio map warrants reweighting in Week 4. Any feature where MC/data shapes disagree goes on the exclusion list immediately — do not defer this decision to Week 4.
 - Read Cooper's 1-page written summary by EOD Friday; send written feedback before Week 3.
 
 **Done when.**
-- `baseline_contamination_table.csv` with one row per (p, theta) bin, columns {p_low, p_high, theta_low, theta_high, N_KtoK, N_pitoK, N_ptoK, P_K, C_pitoK, C_ptoK, eps_K, M_Ktopi, M_Ktop, and corresponding statistical uncertainties}, using Marco's notation throughout.
+- `baseline_contamination_table.csv` with one row per (p, theta) bin, columns {p_low, p_high, theta_low, theta_high, N_KtoK, N_pitoK, N_ptoK, P_K, C_pitoK, C_ptoK, eps_K, M_Ktopi, M_Ktop, and corresponding statistical uncertainties}.
 - Nine-panel 2D map figure (N-counts, purity/contamination, efficiency/mis-ID) committed to `/figures/baseline_2d_maps.png`.
-- Two-row 1D-vs-P figure at two theta slices committed to `/figures/baseline_1d_vs_p.png`.
-- Feature audit complete: MC/data distribution overlays for all columns 20–40 in `/figures/feature_audit/`; approved and flagged feature lists in `notes/feature_audit.md`.
+- Two-row 1D-vs-p figure at two theta slices committed to `/figures/baseline_1d_vs_p.png`.
+- Feature audit complete: MC/data distribution overlays for all Group 1–3 variables in `/figures/feature_audit/`; per-feature decision table (KEEP / CANDIDATE / DROP) in `notes/feature_audit.md`.
+- 2D (p, θ) data/MC ratio map in `/figures/feature_audit/ptheta_data_mc_ratio.png`; reweighting recommendation documented in `notes/feature_audit.md`.
 - `M^{K→π}` 2D map in `/figures/kpi_misid_map.png`; results documented in `notes/kpi_contamination.md`.
-- 1-page written summary `week1_summary.md` written and sent to Maria.
+- 1-page written summary `notes/feature_audit.md` complete; `week1_summary.md` written and sent to Maria.
 
 **Risks / dependencies.**
 - ntuple statistics insufficient at high p. Severity M. Mitigation: scale up the file list early in the week; do not wait until Friday.
 - Column names in the ntuple don't match variable names used in prior notes or literature. Severity L. Mitigation: write a `feature_map.py` that translates once for all downstream code.
-- Data/MC feature disagreement affects many variables (Step 2c). Severity M. Mitigation: run the audit early in the week so flagged features are identified before any ML training begins. A reduced feature set still yields a valid classifier.
+- Data/MC feature disagreement affects many variables (Steps 2c/2d). Severity M. Mitigation: run the audit early in the week so flagged features are identified before any ML training begins. A reduced feature set still yields a valid classifier.
 
 **Fallback / scope-down.** If the feature audit reveals broken features (e.g. FTOF time always zero), table the broken features and proceed with whichever subset is correct. Do not block on fixing the groovy script in Week 2; come back to it in Week 3 if needed.
 
