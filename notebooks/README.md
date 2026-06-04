@@ -18,4 +18,8 @@ This doccument gives a brief description on what each program in notebooks does
 
 - EfficiancyWIP.ipynb | prototype program for developing binning capabilities and the computations of purity, contamination, Mis-ID, and efficiency.
 
-- compute_baseline.ipynb produces proper efficiency contamination ect, plots (1D and 2D) with bins on momentum and theta. Variations starting with P or PI are targeting to see the contributions of particular particles, while ones that start with PC followed by P or PI will do the same but with a momentum based chi2pid cut 
+- compute_baseline.ipynb produces  efficiency contamination ect, plots (1D and 2D) with bins on momentum and theta. Variations starting with P or PI are targeting to see the contributions of particular particles, while ones that start with PC followed by P or PI will do the same but with a momentum based chi2pid cut 
+
+- compute_baselineV2.ipynb | produces efficiency contamination, ect plots, along with showing specific particle contributions to mis-id and contaminations. This program also creates plots useful for determining which chi2cuts work best as a baseline.
+
+- audit.ipynb generates histograms of relevant variables to audit them for existing.
