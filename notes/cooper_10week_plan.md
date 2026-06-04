@@ -166,7 +166,6 @@ The per-variable decision is: **KEEP** (use in training), **CANDIDATE** (evaluat
   - `ecin_energy` (col 24), `ecout_energy` (col 25)
   - `ecin_time` (col 26), `ecout_time` (col 27)
   - `ecin_path` (col 28), `ecout_path` (col 29)
-  - `nphe_htcc` (col 30)
 
 **Group 3 — Candidate additional features** (Connor dropped these; Cooper evaluates whether they agree well enough to include):
   - `pcal_energy` (col 31), `pcal_time` (col 32), `pcal_path` (col 33)
