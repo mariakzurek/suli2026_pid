@@ -1,0 +1,541 @@
+% =============================================================================
+% SULI 2026 — ML K+ PID for CLAS12 SIDIS
+% Author: Cooper Bell (SULI Student, Jefferson Lab)
+% PI: Maria Zurek (Argonne National Laboratory)
+%
+% TEMPLATE — fill in content as the summer progresses.
+% Weeks 1-2 deliverable: Sections 1-5 partially filled; placeholders
+% for all figures and tables Cooper produces in Weeks 1-2.
+%
+% Compile: pdflatex report_template.tex  (twice for cross-references)
+%          bibtex report_template
+%          pdflatex report_template.tex (twice more)
+% =============================================================================
+
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{hyperref}
+\usepackage{siunitx}
+\usepackage{booktabs}
+\usepackage{cite}
+
+\hypersetup{colorlinks=true, linkcolor=blue, citecolor=blue, urlcolor=blue}
+
+% -----------------------------------------------------------------------------
+% Handy shorthand — add sparingly; keep the preamble minimal
+% -----------------------------------------------------------------------------
+\newcommand{\Kp}{K^{+}}
+\newcommand{\pip}{\pi^{+}}
+\newcommand{\epKX}{ep \to e'\,p\,\Kp\,X}
+
+% =============================================================================
+\title{Machine-Learning Particle Identification\\
+       for \boldmath{$K^+$} Identification in CLAS12 SIDIS}
+
+\author{Cooper Bell \\
+  \small{SULI Student, Jefferson Lab} \\[2pt]
+  \small{PI: Maria Zurek, Argonne National Laboratory}}
+
+\date{\today}
+% =============================================================================
+
+\begin{document}
+
+\maketitle
+
+% =============================================================================
+\begin{abstract}
+% Cooper: write ~150 words here by end of Week 2. Describe (1) the physics
+% motivation — kaon SIDIS and why PID purity matters; (2) the contamination
+% problem at high momentum; (3) the ML approach (BDT trained on clasdis MC);
+% (4) the scope of this report (Weeks 1-2: ntuple, baseline, data/MC audit).
+% Draft placeholder below — replace completely.
+TODO: Abstract placeholder. This report describes the development of a
+machine-learning classifier for $\Kp$ particle identification in the
+CLAS12 SIDIS reaction $\epKX$.
+The study uses \texttt{clasdis} Monte Carlo with geometric truth matching
+to characterize baseline Event Builder PID performance and to audit detector
+variable agreement between simulation and RGA pass-2 data.
+Weeks~1 and~2 deliverables are documented here; model training and
+validation will be reported in subsequent updates.
+\end{abstract}
+
+% =============================================================================
+\section{Introduction}
+\label{sec:intro}
+% Cooper: 3-4 paragraphs. Cover:
+%   (1) Why kaon SIDIS matters — flavor decomposition of TMDs, strangeness.
+%   (2) The contamination problem: pion leakage into EB-K+ sample at high p.
+%       Quote the rough numbers (30-50% at p > 2.5 GeV/c) from Week-2 baseline.
+%   (3) Why ML is a natural fit: chi2pid uses one FTOF number; ML can use all
+%       detector responses simultaneously (FTOF panels, ECAL, HTCC).
+%   (4) State the analysis channel and Cooper's specific goal.
+% Reference the CLAS12 detector paper \cite{Burkert2020} and FTOF paper
+% \cite{Carman2020} where appropriate.
+% -----------------------------------------------------------------------
+
+Semi-inclusive deep-inelastic scattering (SIDIS) off proton targets
+provides direct access to transverse-momentum-dependent parton distributions
+(TMDs) and their flavor structure.
+Kaon electroproduction, $\epKX$, is particularly sensitive to the
+strange-quark sea and to fragmentation functions that are not constrained by
+pion measurements alone.
+Accurate $\Kp$ identification is therefore essential for the SIDIS physics
+program at CLAS12~\cite{Burkert2020}.
+
+The CLAS12 Event Builder (EB) assigns particle identities using time-of-flight
+information from the FTOF system~\cite{Carman2020}.
+At low momenta ($p \lesssim \SI{2}{GeV/c}$), pions and kaons have
+sufficiently different velocities ($\beta = v/c$) that the FTOF resolves them
+cleanly.
+Above $p \approx \SI{2.5}{GeV/c}$ the $\beta$ curves for $\pip$ and $\Kp$
+converge, and pion contamination in the EB-identified $\Kp$ sample can reach
+30--50\% (to be quantified in Section~\ref{sec:baseline}).
+The EB's refinement quantity \texttt{chi2pid} encodes the goodness-of-fit of
+the measured $\beta$ to the kaon hypothesis; the production pass-2 cut is
+momentum-dependent, but still uses essentially one number from the FTOF.
+
+A machine-learning classifier can exploit the full set of detector responses
+available per track---FTOF hit patterns across two panel layers, calorimeter
+energy deposits (PCAL, ECin, ECout), and the HTCC Cherenkov signal---to learn
+discriminants that \texttt{chi2pid} alone misses.
+The primary model is a gradient-boosted decision tree (BDT) trained on
+\texttt{clasdis} Monte Carlo, where geometric truth matching provides exact
+particle labels.
+
+This report documents Weeks~1 and~2 of the 10-week project:
+ntuple production, baseline PID characterization, and the data/MC variable
+agreement audit that governs which features enter ML training.
+
+% =============================================================================
+\section{Data and Monte Carlo Samples}
+\label{sec:samples}
+
+\subsection{Monte Carlo: \texttt{clasdis}}
+% Cooper: describe clasdis briefly — what generator it is, inbending RGA
+% kinematics, beam energy, approximate file count you processed.
+% Note the truth-matching algorithm (anchor on MC::Particle, geometric cone
+% |Delta phi| < 6 deg, |Delta theta| < 2 deg, best match wins).
+The \texttt{clasdis} generator~\cite{Burkert2020} provides the Monte Carlo
+sample for this study.
+We use the RGA fall-2018 inbending configuration at a beam energy of
+\SI{10.604}{GeV}.
+% TODO: insert total file count and approximate event yield after Week-2 scale-up.
+Each reconstructed track is geometrically matched to a \texttt{MC::Lund} truth
+particle within a cone of $|\Delta\phi| < 6^\circ$ and
+$|\Delta\theta| < 2^\circ$; the closest match within the cone is selected.
+Tracks with no match are dropped from the training set.
+
+\subsection{RGA Pass-2 Data}
+% Cooper: briefly describe the RGA pass-2 data subset you compare against in
+% the data/MC audit (Section 5). Note FD-only, EB-K+ tracks, approximate
+% run range if known. Exact run list TBD with Maria.
+RGA pass-2 data from the fall-2018 inbending run period are used for the
+data/MC variable agreement study (Section~\ref{sec:datamc}).
+Only EB-identified $\Kp$ tracks in the Forward Detector are selected,
+applying the same vertex and fiducial requirements as the MC sample.
+The run list and luminosity normalization are confirmed with the PI.
+
+\subsection{Ntuple Production Pipeline}
+\label{sec:pipeline}
+% Cooper: describe the processing chain in your own words after running it.
+% Mention both groovy scripts, the converter, and the 53-column output.
+% Describe the cuts explicitly (FD status in [2000,4000), vertex |vz| range,
+% DC fiducial flags). Confirm exact column count once you have run the script.
+
+Ntuples are produced from HIPO files using the CLAS12 analysis software
+framework~\cite{Burkert2020}.
+Two Groovy scripts are used:
+\texttt{processing\_mc\_pid\_training.groovy} processes MC files and writes
+MC-truth labels; \texttt{processing\_data\_pid\_training.groovy} runs the
+identical reconstruction chain on data without truth information.
+Both produce space-separated text files that are converted to ROOT TTrees
+by \texttt{convert\_txt\_to\_root.cpp}.
+
+\textbf{Selection cuts applied at the ntuple stage:}
+\begin{itemize}
+  \item Forward Detector only: track \texttt{status} $\in [2000, 4000)$.
+  \item Vertex $z$-position: $|v_z|<$ [TODO: confirm cut value with Maria].
+  \item DC fiducial requirements: standard CLAS12 fiducial flags.
+  \item EB-assigned PID restricted to $\{\pip, \pi^-, \Kp, K^-\}$.
+\end{itemize}
+
+Each output row corresponds to one reconstructed hadron track and contains
+53~columns organized as follows:
+event identifiers (run, event, helicity);
+DIS kinematics ($Q^2$, $W$, $x$, $y$, $\nu$);
+per-track kinematics and EB identity ($p$, $\theta$, $\phi$, $v_z$, sector,
+status, \texttt{pid});
+raw EB inputs (\texttt{beta}, \texttt{chi2pid});
+FTOF panel-1A/1B responses (energy, time, path length);
+ECAL inner/outer responses (energy, time, path length);
+HTCC photoelectron count (\texttt{nphe\_htcc});
+PCAL and FTOF panel-2 responses (energy, time, path length);
+14~RICH variables (cross-check only, not used in ML training);
+and MC truth columns (\texttt{mc\_matching\_pid}, \texttt{mc\_parent\_pid},
+\texttt{mc\_match\_quality}).
+Missing values use the sentinel $-9999$.
+The full column reference is given in Appendix~\ref{app:columns}.
+
+% =============================================================================
+\section{PID Metric Definitions}
+\label{sec:metrics}
+% Cooper: this section is already drafted below using Marco's definitions from
+% the 2026-04-21 SIDIS meeting (Mirazita \cite{Mirazita2026}).
+% Review it, verify the notation matches what you use in your Python scripts,
+% and add one sentence connecting each metric to the pd.crosstab output.
+
+We follow the PID metric conventions established by the CLAS12 SIDIS
+group~\cite{Mirazita2026}.
+Let $N_{i \to j}$ denote the number of tracks whose MC truth species is $i$
+and whose Event Builder (or classifier) assigned species is $j$, where
+$i, j \in \{\pip, \Kp, p, \ldots\}$.
+All four metrics below are computed from the single confusion matrix
+$N_{i \to j}$, obtained in Python via
+\texttt{pd.crosstab(df["mc\_matching\_pid"], df["pid"])}.
+
+\textbf{Purity} of the $\Kp$ sample --- fraction of EB-identified $\Kp$ that
+are truly $\Kp$:
+\[
+  P^{K} = \frac{N_{K \to K}}{\displaystyle\sum_{i} N_{i \to K}}
+\]
+
+\textbf{Contamination} of $\Kp$ by species $i$ --- fraction of EB-identified
+$\Kp$ that are actually species $i$:
+\[
+  C^{i \to K} = \frac{N_{i \to K}}{\displaystyle\sum_{k} N_{k \to K}}
+\]
+
+Closure: $P^{K} + \sum_{i \neq K} C^{i \to K} = 1$.
+
+\textbf{Efficiency} --- fraction of true $\Kp$ correctly identified as $\Kp$:
+\[
+  \varepsilon^{K} = \frac{N_{K \to K}}{\displaystyle\sum_{j} N_{K \to j}}
+\]
+
+\textbf{Mis-ID} of true $\Kp$ to species $j$ --- fraction of true $\Kp$ wrongly
+assigned to $j$:
+\[
+  M^{K \to j} = \frac{N_{K \to j}}{\displaystyle\sum_{k} N_{K \to k}}
+\]
+
+Closure: $\varepsilon^{K} + \sum_{j \neq K} M^{K \to j} = 1$.
+
+Purity and contamination normalize to \emph{detected} (EB-labeled) counts and
+depend on the $\pip{:}\Kp{:}p$ production-rate ratio in the sample; use them
+when reporting the composition of a selected data sample.
+Efficiency and mis-ID normalize to \emph{true} counts and reflect detector
+and classifier performance independently of the production rate; use them when
+characterizing the PID system itself.
+
+% =============================================================================
+\section{Baseline PID Performance}
+\label{sec:baseline}
+
+\subsection{Standard EB \texttt{chi2pid} Cuts}
+% Cooper: describe the three chi2pid options clearly:
+%   (1) flat |chi2pid| < 3 (loose, orientation only — not the production baseline)
+%   (2) momentum-dependent pass-2 cut (baseline_chi2pid.py: passes_kplus_chi2pid_cut)
+%   (3) per-run Sp19/MC variant (if relevant for your sample)
+% State clearly which one is the headline baseline and why.
+
+The CLAS12 Event Builder provides a variable \texttt{chi2pid} that quantifies
+how closely a track's measured $\beta$ matches the kaon hypothesis given its
+momentum.
+Three common cut choices appear in the literature:
+\begin{enumerate}
+  \item \textbf{Flat} $|\texttt{chi2pid}| < 3$: symmetric window used for
+        orientation and quick checks; \emph{not} the production baseline.
+  \item \textbf{Pass-2 momentum-dependent cut}
+        (\texttt{passes\_kplus\_chi2pid\_cut} in
+        \texttt{scripts/baseline\_chi2pid.py}): asymmetric window that
+        contracts above $p = \SI{2}{GeV/c}$ to compensate for worsening
+        $\pip$/$\Kp$ separation.
+        This is the headline baseline used throughout this study.
+  \item \textbf{Per-run Sp19/MC variant}: an alternative parameterization
+        from the Spring-2019 data period; included for comparison where noted.
+\end{enumerate}
+
+% Cooper: after computing baseline results in Week 2, add 1-2 sentences
+% interpreting the momentum-dependent cut's behavior and why it was chosen.
+
+\subsection{Contamination Matrix from MC Truth}
+\label{sec:contam_matrix}
+% Cooper: replace the placeholder values in Table 1 with real numbers from
+% pd.crosstab(df["mc_matching_pid"], df["pid"]) on the EB-K+ subsample.
+% Add statistical uncertainties (sqrt(N) for raw counts; propagate to ratios).
+
+Table~\ref{tab:contam_matrix} shows the EB-pid $\times$ MC-truth contamination
+matrix for the \texttt{clasdis} sample after the pass-2 momentum-dependent
+\texttt{chi2pid} cut.
+Each entry $N_{i \to K}$ is the raw track count; derived metrics
+$P^K$ and $C^{i \to K}$ appear in the bottom rows.
+
+\begin{table}[h]
+  \centering
+  \caption{EB-pid $\times$ MC-truth confusion matrix for EB-identified $\Kp$
+           tracks after the pass-2 \texttt{chi2pid} cut.
+           Values are placeholder (TBD) --- replace with Week-2 results.}
+  \label{tab:contam_matrix}
+  \begin{tabular}{lcccc}
+    \toprule
+    & \multicolumn{4}{c}{MC truth species} \\
+    \cmidrule(lr){2-5}
+    Quantity & $\Kp$ & $\pip$ & $p$ & other \\
+    \midrule
+    $N_{i \to K}$ (raw counts)          & \textit{TBD} & \textit{TBD} & \textit{TBD} & \textit{TBD} \\
+    $C^{i \to K}$ (contamination)       & ---          & \textit{TBD} & \textit{TBD} & \textit{TBD} \\
+    \midrule
+    $P^K$ (purity) $= N_{K \to K}/\sum_i N_{i \to K}$ & \multicolumn{4}{c}{\textit{TBD}} \\
+    $\varepsilon^K$ (efficiency)        & \multicolumn{4}{c}{\textit{TBD}} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{figure}[h]
+  \centering
+  % Cooper: replace placeholder.png with figures/beta_vs_p_truth_classes.png
+  % once produced in Week 1 Task 4.
+  \includegraphics[width=0.85\textwidth]{placeholder.png}
+  \caption{TODO: $\beta$ vs $p$ for EB-K+ tracks, colored by MC truth class
+           ($\pip$, $\Kp$, $p$).
+           The convergence of the $\pip$ and $\Kp$ bands above
+           $p \approx \SI{2.5}{GeV/c}$ illustrates the contamination problem.
+           Produce in Week~1 Task~4 and save as
+           \texttt{figures/beta\_vs\_p\_truth\_classes.png}.}
+  \label{fig:beta_vs_p}
+\end{figure}
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.85\textwidth]{placeholder.png}
+  \caption{TODO: \texttt{chi2pid} distribution per MC truth class ($\pip$,
+           $\Kp$, $p$) for all EB-K+ tracks (no \texttt{chi2pid} cut applied).
+           The degree of overlap between the $\pip$ and $\Kp$ distributions
+           sets the ceiling on \texttt{chi2pid}-based separation.
+           Produce in Week~1 Task~4; save as
+           \texttt{figures/chi2pid\_by\_truth\_class.png}.}
+  \label{fig:chi2pid_dist}
+\end{figure}
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=\textwidth]{placeholder.png}
+  \caption{TODO: \texttt{chi2pid} vs $p$ 2D maps for EB-K+ tracks, one panel
+           per MC truth class.
+           Indicates where the pass-2 momentum-dependent cut is tight vs.\
+           loose.
+           Produce in Week~2 Step~2b; save as
+           \texttt{figures/chi2pid\_vs\_p\_2d.png}.}
+  \label{fig:chi2pid_2d}
+\end{figure}
+
+\subsection{Baseline Efficiency, Purity, and Contamination per $(p,\,\theta)$ Bin}
+% Cooper: after running compute_baseline.py (Week-2 Step 2b), replace the
+% figure placeholder with the nine-panel 2D map figure
+% (figures/baseline_2d_maps.png). Add a paragraph describing the main trends:
+% where is contamination worst, where is efficiency highest, etc.
+
+Figure~\ref{fig:baseline_2d} shows the full set of baseline performance metrics
+in $(p,\,\theta)$ bins.
+% TODO: add 1-2 sentences interpreting the 2D maps after Week-2 results are in.
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=\textwidth]{placeholder.png}
+  \caption{TODO: nine-panel 2D map in $(p,\,\theta)$ for the baseline
+           pass-2 \texttt{chi2pid} cut.
+           Top row: raw counts $N_{K \to K}$, $N_{\pi \to K}$, $N_{p \to K}$.
+           Middle row: $P^K$, $C^{\pi \to K}$, $C^{p \to K}$.
+           Bottom row: $\varepsilon^K$, $M^{K \to \pi}$, $M^{K \to p}$.
+           Produce in Week~2 Step~2b; save as
+           \texttt{figures/baseline\_2d\_maps.png}.}
+  \label{fig:baseline_2d}
+\end{figure}
+
+% =============================================================================
+\section{Data/MC Variable Agreement Study}
+\label{sec:datamc}
+
+\subsection{Methodology}
+% Cooper: describe the audit procedure: coarse (p,theta) bins (3x3 grid),
+% KS test threshold (> 0.05 flags a variable), KEEP/CANDIDATE/DROP decision
+% logic, and the standing rule that any disagreeing variable is excluded from
+% ML training before training begins.
+
+Before any ML training, each detector variable is compared between the
+\texttt{clasdis} MC (EB-$\Kp$ tracks) and RGA pass-2 data (EB-$\Kp$ tracks)
+in coarse $(p,\,\theta)$ slices: $p \in [1,2],\,[2,3],\,[3,5]$~\GeV{} crossed
+with $\theta \in [5^\circ, 15^\circ],\,[15^\circ, 25^\circ],\,[25^\circ,
+35^\circ]$, giving nine cells.
+In each cell, the 1D distributions of MC and data are overlaid.
+A variable is flagged if the Kolmogorov--Smirnov (KS) statistic exceeds 0.05
+or if the shapes disagree visually.
+
+Flagged variables are assigned one of three statuses:
+\textbf{KEEP} (agreement sufficient for ML training),
+\textbf{CANDIDATE} (borderline; requires further evaluation),
+or \textbf{DROP} (excluded from ML training until the disagreement is understood).
+No flagged variable enters the training feature set until this audit is resolved;
+this rule is non-negotiable.
+
+\subsection{Per-Feature Comparison}
+% Cooper: replace the placeholder figure with the feature audit overlay grid
+% once produced in Week-2 Step 2c. Describe the most striking agreements and
+% disagreements in a brief paragraph.
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=\textwidth]{placeholder.png}
+  \caption{TODO: data/MC distribution overlays for key ML training features
+           in the $(p,\,\theta)$ coarse bins.
+           Each panel shows MC (filled) and data (open histogram) for one
+           variable in one kinematic cell.
+           Features shown: \texttt{beta}, \texttt{chi2pid}, FTOF and ECAL
+           energies, \texttt{nphe\_htcc}.
+           Save individual panels to
+           \texttt{figures/feature\_audit/} and a combined grid as
+           \texttt{figures/feature\_audit\_grid.png}.}
+  \label{fig:mcdata_audit_ftof}
+\end{figure}
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.75\textwidth]{placeholder.png}
+  \caption{TODO: 2D $(p,\,\theta)$ data/MC ratio map for EB-$\Kp$ tracks.
+           A flat ratio map ($\approx 1$ everywhere) indicates no kinematic
+           reweighting is needed for ML training; significant variation warrants
+           reweighting in Week~4.
+           Save as \texttt{figures/feature\_audit/ptheta\_data\_mc\_ratio.png}.}
+  \label{fig:ptheta_ratio}
+\end{figure}
+
+\subsection{Discussion of Disagreements}
+% Cooper: after completing the audit (Week-2 Step 2c/2d), write 1-2 paragraphs
+% summarizing: which variables passed (KEEP), which are borderline (CANDIDATE),
+% which are excluded (DROP). State whether the (p,theta) ratio map in
+% Figure \ref{fig:ptheta_ratio} warrants reweighting. Document the final
+% feature list agreed on with Maria.
+
+Table~\ref{tab:feature_audit} summarizes the per-feature KEEP/CANDIDATE/DROP
+decisions from the Week-2 audit.
+
+\begin{table}[h]
+  \centering
+  \caption{Per-feature data/MC agreement audit results (Weeks~1--2).
+           KS$>0.05$ or visual shape disagreement triggers a CANDIDATE or DROP
+           assignment.
+           Values TBD --- fill after completing the audit in Week~2.}
+  \label{tab:feature_audit}
+  \begin{tabular}{llcc}
+    \toprule
+    Variable & Group & KS (worst cell) & Decision \\
+    \midrule
+    \texttt{beta}           & 2 (ML feature)     & \textit{TBD} & \textit{TBD} \\
+    \texttt{chi2pid}        & 2 (ML feature)     & \textit{TBD} & \textit{TBD} \\
+    \texttt{ftof\_energy\_1A} & 2 (ML feature)   & \textit{TBD} & \textit{TBD} \\
+    \texttt{ftof\_energy\_1B} & 2 (ML feature)   & \textit{TBD} & \textit{TBD} \\
+    \texttt{ftof\_time\_1A}   & 2 (ML feature)   & \textit{TBD} & \textit{TBD} \\
+    \texttt{ftof\_time\_1B}   & 2 (ML feature)   & \textit{TBD} & \textit{TBD} \\
+    \texttt{ecin\_energy}   & 2 (ML feature)     & \textit{TBD} & \textit{TBD} \\
+    \texttt{ecout\_energy}  & 2 (ML feature)     & \textit{TBD} & \textit{TBD} \\
+    \texttt{nphe\_htcc}     & 2 (ML feature)     & \textit{TBD} & \textit{TBD} \\
+    \texttt{pcal\_energy}   & 3 (candidate)      & \textit{TBD} & \textit{TBD} \\
+    \texttt{ftof\_energy\_2} & 3 (candidate)     & \textit{TBD} & \textit{TBD} \\
+    \midrule
+    \multicolumn{4}{l}{\textit{(complete with all Group 1--3 variables after audit)}} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+% Cooper: add a paragraph here once the audit is complete.
+% TODO: discuss findings.
+
+% =============================================================================
+\section{Summary and Next Steps}
+\label{sec:summary}
+% Cooper: write 2-3 paragraphs covering what was accomplished in Weeks 1-2:
+%   (1) ntuple produced and validated (row count, class balance, RICH presence);
+%   (2) baseline PID characterized (cite your headline numbers from Table 1
+%       and Figure 4 once filled in);
+%   (3) data/MC audit complete (cite the feature decision table).
+% Then one short paragraph pointing to Weeks 3+ work.
+
+Weeks~1 and~2 established the foundations for the ML classification study.
+The \texttt{clasdis} MC ntuple was produced via
+\texttt{processing\_mc\_pid\_training.groovy} and loaded into Python;
+initial diagnostic plots (Figures~\ref{fig:beta_vs_p}
+and~\ref{fig:chi2pid_dist}) confirmed that the truth-class separation problem
+is clearly visible in the raw detector variables.
+% TODO: add specific numbers (row count, class balance, RICH status) after
+% completing Task 3.
+
+The baseline EB pass-2 momentum-dependent \texttt{chi2pid} cut was applied and
+characterized via the formal PID metrics of Section~\ref{sec:metrics}.
+% TODO: summarize the headline baseline contamination number from Table 1 once
+% filled in (e.g., "pion contamination C^{pi->K} reaches X% in the highest
+% momentum bin p in [4,5] GeV/c").
+
+The data/MC variable agreement audit (Section~\ref{sec:datamc}) established
+which detector variables may enter ML training.
+% TODO: summarize the audit outcome: how many variables KEEP/CANDIDATE/DROP.
+
+Weeks~3 through~10 proceed to full-statistics ntuple production, BDT and MLP
+model training, per-$(p,\theta)$-bin threshold optimization, and data-driven
+validation using the exclusive $ep \to e\,h^+\,(n)$ missing-mass method and
+RICH cross-check.
+The final deliverable is a calibrated probabilistic classifier with a
+quantified contamination improvement over the EB baseline.
+
+% =============================================================================
+\appendix
+\section{Output Ntuple Column Reference}
+\label{app:columns}
+% Cooper: verify the column count (53 vs 50 vs 57 — check the script's
+% startup banner when you run it) and correct the table below if needed.
+% The column map in cooper_day1_and_week1.md Section 4e is the reference.
+
+Table~\ref{tab:columns} lists all 53~columns in the ntuple produced by
+\texttt{processing\_mc\_pid\_training.groovy}.
+
+\begin{table}[h]
+  \centering
+  \caption{Output ntuple column reference (53 columns).
+           Sentinel value $-9999$ indicates missing or inapplicable data.}
+  \label{tab:columns}
+  \small
+  \begin{tabular}{clll}
+    \toprule
+    Col(s) & Name(s) & Group & Description \\
+    \midrule
+    1--3   & \texttt{runnum, evnum, helicity}          & Event ID      & Run number, event number, beam helicity \\
+    4--8   & \texttt{Q2, W, x, y, nu}                  & DIS kin.      & Standard DIS variables \\
+    9      & \texttt{pid}                               & Track ID      & EB-assigned PDG code \\
+    10--15 & \texttt{p, theta, phi, vz, sector, status} & Track kin.   & Momentum, angles, vertex $z$, sector, status \\
+    16--17 & \texttt{beta, chi2pid}                     & EB inputs     & Measured $\beta$; kaon-hypothesis $\chi^2$ \\
+    18--23 & \texttt{ftof\_energy\_1A/1B,}              & FTOF 1A/1B    & Energy, time, path length per panel \\
+           & \texttt{ftof\_time\_1A/1B,}                &               & \\
+           & \texttt{ftof\_path\_1A/1B}                 &               & \\
+    24--29 & \texttt{ecin/ecout\_energy,}               & ECAL in/out   & Energy, time, path length per layer \\
+           & \texttt{ecin/ecout\_time,}                  &               & \\
+           & \texttt{ecin/ecout\_path}                  &               & \\
+    30     & \texttt{nphe\_htcc}                        & HTCC          & Number of HTCC photoelectrons \\
+    31--36 & \texttt{pcal\_energy/time/path,}           & PCAL + FTOF-2 & Connor group candidate features \\
+           & \texttt{ftof\_energy/time/path\_2}         &               & \\
+    37--50 & \texttt{rich\_*} (14 variables)            & RICH          & Cross-check only; not ML training features \\
+    51     & \texttt{mc\_matching\_pid}                 & MC truth      & PDG code of matched MC particle ($-9999$ = no match) \\
+    52     & \texttt{mc\_parent\_pid}                   & MC truth      & PDG code of parent in Lund record \\
+    53     & \texttt{mc\_match\_quality}                & MC truth      & Match quality metric (angular distance proxy) \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+% =============================================================================
+\bibliographystyle{unsrt}
+\bibliography{references}
+
+\end{document}
