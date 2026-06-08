@@ -99,6 +99,8 @@ Tasks 3 and 4 slide into Week 2 without blocking the overall schedule.
 
 **Theme.** Define the baseline (EB + pass-2 momentum-dependent chi2pid cut; see `scripts/baseline_chi2pid.py`) precisely, in code, and produce the first MC-truth contamination measurement against that baseline. Audit the feature distributions for MC-truth pi+ vs K+ vs p.
 
+> **Status (end of Week 2).** Baseline contamination work is **complete**: β vs p plots, χ²pid distributions, contamination matrix, and the nine-panel 2D map are done. The data/MC variable agreement audit (Steps 2c–2d below) was not finished and is **carried over into Week 3** — see Week 3 for the continued task description.
+
 **Cooper's tasks.**
 - **End of week: write the 1-page written summary** (moved from Week 1). Write
   `~/CLAS/SULI/notes/week1_summary.md`. Four sections: (1) what is in the ntuple —
@@ -149,7 +151,7 @@ Write a Python script `compute_baseline.py` that:
   - **2D maps in (p, theta):** `N(π→K)`, `N(K→K)`, `N(p→K)` (raw count maps); then `C^{π→K}`, `P^K`, `C^{p→K}` (purity/contamination maps); then `ε^K`, `M^{K→π}`, `M^{K→p}` (efficiency/mis-ID maps). Nine panels in a 3×3 layout.
   - **1D plots vs p at fixed theta:** at two representative theta slices (e.g., ~9° and ~25°), plot `P^K`, `C^{π→K}`, `C^{p→K}` vs p in one panel row, and `ε^K`, `M^{K→π}`, `M^{K→p}` vs p in a second panel row. These are the key diagnostic plots for the report and poster.
 
-**Step 2c — Data/MC variable-agreement audit.**
+**Step 2c — Data/MC variable-agreement audit.** *(Not completed in Week 2 — carried over into Week 3. See Week 3 for the full task description and output requirements.)*
 
 The PI's standing requirement: *"if MC and data variables disagree, we cannot use them for ML."* Before any ML training begins, audit every relevant variable in the training ntuple against the RGA pass-2 data distribution for the EB-K+ subsample. Do the comparison in coarse (p, θ) slices — use 9 cells: p in [1, 2], [2, 3], [3, 5] GeV crossed with θ in [5°, 15°], [15°, 25°], [25°, 35°]. In each cell, overlay MC (EB-K+ tracks) and data (EB-K+ tracks) 1D distributions. Flag any variable where KS distance > 0.05 or the shapes disagree visually.
 
@@ -173,7 +175,7 @@ The per-variable decision is: **KEEP** (use in training), **CANDIDATE** (evaluat
 
 For each variable, confirm the hit-fraction (fraction of tracks with a non-missing/-9999 value) in MC and in data. Save all overlaid distribution plots to `/figures/feature_audit/`. Summarize the per-feature KEEP / CANDIDATE / DROP decision table in `notes/feature_audit.md`.
 
-**Step 2d — (p, θ) data/MC comparison for the reweighting decision.**
+**Step 2d — (p, θ) data/MC comparison for the reweighting decision.** *(Not completed in Week 2 — carried over into Week 3. See Week 3 for the full task description and output requirements.)*
 
 Even though `p` and `theta` are not ML training features, comparing their 2D distributions between MC and data is critical for Task 3 (Connor's reweighting). Connor's reweighting computes 2D data/MC ratios in (p, θ) bins and reweights MC events to match data; before deciding whether to use that approach, we need to know whether the distributions actually differ and by how much.
 
@@ -196,10 +198,10 @@ Cooper must:
 - `baseline_contamination_table.csv` with one row per (p, theta) bin, columns {p_low, p_high, theta_low, theta_high, N_KtoK, N_pitoK, N_ptoK, P_K, C_pitoK, C_ptoK, eps_K, M_Ktopi, M_Ktop, and corresponding statistical uncertainties}.
 - Nine-panel 2D map figure (N-counts, purity/contamination, efficiency/mis-ID) committed to `/figures/baseline_2d_maps.png`.
 - Two-row 1D-vs-p figure at two theta slices committed to `/figures/baseline_1d_vs_p.png`.
-- Feature audit complete: MC/data distribution overlays for all Group 1–3 variables in `/figures/feature_audit/`; per-feature decision table (KEEP / CANDIDATE / DROP) in `notes/feature_audit.md`.
-- 2D (p, θ) data/MC ratio map in `/figures/feature_audit/ptheta_data_mc_ratio.png`; reweighting recommendation documented in `notes/feature_audit.md`.
+- **Baseline plots + contamination matrix complete (done).** β vs p plots, χ²pid distributions, and contamination matrix produced and committed.
+- Feature audit (Steps 2c–2d): MC/data distribution overlays, per-feature KEEP / CANDIDATE / DROP table, and 2D (p, θ) ratio map **carried into Week 3** (not a Week 2 completion criterion).
 - `M^{K→π}` 2D map in `/figures/kpi_misid_map.png`; results documented in `notes/kpi_contamination.md`.
-- 1-page written summary `notes/feature_audit.md` complete; `week1_summary.md` written and sent to Maria.
+- `week1_summary.md` written and sent to Maria.
 
 **Risks / dependencies.**
 - ntuple statistics insufficient at high p. Severity M. Mitigation: scale up the file list early in the week; do not wait until Friday.
@@ -210,35 +212,83 @@ Cooper must:
 
 ---
 
-### Week 3 — MC-truth contamination measurement complete; ntuple production at scale
+### Week 3 — Data/MC audit; production-scale ntuples; Week 1-2 report
 
-**Theme.** Finish the MC-truth side of the contamination measurement. Produce the analysis-channel ntuple. Lock down the train/test/validation split.
+**Theme.** Finish the data/MC variable agreement audit carried over from Week 2. Scale up ntuple production to the full MC sample and a meaningful data sample using slurm batch jobs. Complete and submit the Week 1-2 written report.
 
 **Cooper's tasks.**
-- Submit a slurm job array to process the **full** Stefan Diehl `clasdis` inbending sample with `processing_mc_pid_training.groovy`. Target output on `/volatile/` (or `/work/` if persistent). Document the submission script in repo.
-- Run `processing_mc_three_particles.groovy` with `p1=2212, p2=321` on the same `clasdis` files. This produces the analysis-channel ntuple for `ep → e' p K+ X` with MC-truth labels.
-- Define the train / validation / test split. Recommendation: split at the file level (not event level), randomly, with a fixed seed. ~70% train, ~15% validation, ~15% test. Record the file lists in repo as `train_files.txt`, `val_files.txt`, `test_files.txt`.
+
+**Task 3a — Finish the data/MC variable-agreement audit (carried over from Week 2).**
+
+This is the continuation of Steps 2c and 2d from Week 2. The goal is to establish, for every candidate ML training feature, whether MC and data distributions agree well enough to trust the feature in training.
+
+*What the audit involves:* per-feature overlays of MC vs data 1D distributions in 9 coarse (p, θ) slices (p in [1, 2], [2, 3], [3, 5] GeV × θ in [5°, 15°], [15°, 25°], [25°, 35°]); KS-test flag per feature per slice (flag if KS distance > 0.05 or shapes disagree visually); KEEP / CANDIDATE / DROP decision per feature; and the 2D (p, θ) data/MC ratio map needed for the reweighting decision.
+
+*Tooling:* the `compare_mc_data.py` script (being written separately) handles the per-feature comparison mechanics — generating the overlaid histograms and computing the KS statistic. Cooper should **use** this script AND understand what each test does: what the KS statistic measures, what the null hypothesis is, and why KS distance > 0.05 is the threshold. Do not treat the script as a black box.
+
+*Outputs:*
+  - `notes/feature_audit.md` — per-feature decision table (one row per variable, columns: feature name, hit-fraction MC, hit-fraction data, max KS distance across slices, decision, notes).
+  - `figures/feature_audit/` — one overlay plot per feature per (p, θ) slice, plus the 2D (p, θ) data/MC ratio map at `figures/feature_audit/ptheta_data_mc_ratio.png`.
+  - One-paragraph reweighting recommendation in `notes/feature_audit.md`: if the ratio map is roughly flat, no reweighting is needed; if it varies significantly, reweighting is warranted and will be implemented in Week 4.
+
+**Task 3b — Production-scale ntuples.**
+
+Cooper has so far run the processing scripts on one HIPO file each. For the variable audit to be statistically meaningful and for Week 4+ training to work, much larger samples are needed. These runs must go through slurm batch submission — **do not run interactively** at this scale.
+
+*MC sample:* process the **full** RICH-on `clasdis` sample at `/work/clas12/zurek/SULI/clasdis_rich_on/`. Passing `n_files=0` to the script processes all available files in that directory — this is the same directory Cooper has been using for one-file tests. Submit as a slurm array job. Add the submission script to `suli2026_pid/slurm/` (create the directory if it does not exist yet). Document the script in the repo README.
+
+*Data sample:* process at least 10–20 RGA Fa18 inbending pass-2 HIPO files. Input directory: `/cache/clas12/rg-a/production/recon/fall2018/torus-1/pass2/main/train/nSidis/`. The full sample is much larger, but 10–20 files are sufficient for the variable-audit statistics. Submit via slurm (same pattern as MC).
+
+*Outputs:*
+  - MC ntuple from full RICH-on `clasdis` sample written to `/volatile/clas12/<username>/SULI/`. Record total file count, event count, and output size.
+  - Data ntuple from ≥ 10 Fa18 inbending files written to `/volatile/clas12/<username>/SULI/`. Record file count and event count.
+
+**Task 3c — Finish the Week 1-2 report.**
+
+The LaTeX template in `suli2026_pid/report/` still has placeholder text and TODO figure captions. Maria has been leaving comments on the Overleaf project. This task closes those out and gets the report to a clean draft.
+
+Concretely:
+  - **Review every Overleaf comment Maria has left and resolve each one.** Either address the question or concern in the text, or reply to the comment with reasoning if you disagree. No comment should be left unacknowledged.
+  - **Read the report end to end** — not just edit sections in isolation. Make sure the narrative flows: introduction → method → results → discussion.
+  - Fill in remaining placeholders: abstract, introduction prose, section 4 contamination discussion, section 5 audit findings (once the audit from Task 3a is done), summary section.
+  - Replace every TODO figure caption with a real caption describing what is actually shown (axes, units, color coding, key takeaway).
+  - Copy produced PNGs into `report/figures/`.
+  - Compile locally with `pdflatex` (or via Overleaf) and confirm the PDF builds without errors or unresolved references.
+
+- Submit a slurm job array to process the **full** `clasdis` sample through `processing_mc_pid_training.groovy` (see Task 3b above). Run `processing_mc_three_particles.groovy` with `p1=2212, p2=321` on the same files to produce the analysis-channel ntuple for `ep → e' p K+ X`.
+- Define the train / validation / test split. Split at the file level (not event level), randomly, with a fixed seed. Recommended ratio: ~70% train, ~15% validation, ~15% test. Record the file lists in the repo as `train_files.txt`, `val_files.txt`, `test_files.txt`.
 - Compute baseline contamination on the **test set only** to get the final baseline numbers.
 - Read scikit-learn user guide §3.1 (cross-validation), §3.3 (metrics), §1.16 (calibration). One page of notes per section.
-- Produce the chi2pid distribution per truth class (MC) for our sample.
 
 **Maria's tasks.**
+- Review the completed feature audit (`notes/feature_audit.md`). Confirm the KEEP / CANDIDATE / DROP decisions. Decide whether the (p, θ) ratio map warrants reweighting in Week 4.
 - Approve the train/val/test split.
 - 1-hour meeting: walk through the baseline contamination plot. Decide whether the (p, theta) binning needs revision before Week 4.
 - Check in with Cooper on Python/ML progress. If reading is not getting done, adjust Week 4 expectations.
 - **Make decision on hyperon-tagged kaon-truth channel** (see Decision Points). This decision blocks Week 8 planning.
+- **Sign off on the Week 1-2 report draft** after all Overleaf comments are resolved and the PDF compiles clean.
+- If Cooper has not used slurm arrays before, help set up the submission script at the start of the week — do not let this block ntuple production past Tuesday.
 
 **Done when.**
-- Full `clasdis` inbending sample processed through `processing_mc_pid_training.groovy`. Output ntuple(s) on disk, total size and event count documented.
-- Analysis-channel ntuple for `ep → e' p K+ X` produced and validated (the e, p, K+ kinematic distributions look sane).
+- `notes/feature_audit.md` complete with per-feature KEEP / CANDIDATE / DROP decision table.
+- `figures/feature_audit/` populated with per-feature overlay plots and `ptheta_data_mc_ratio.png`.
+- Reweighting recommendation (one paragraph) written in `notes/feature_audit.md`.
+- MC ntuple from full RICH-on `clasdis` sample exists on `/volatile/clas12/<username>/SULI/`; event count and output size documented.
+- Data ntuple from ≥ 10 Fa18 inbending HIPO files exists on `/volatile/clas12/<username>/SULI/`; file count and event count documented.
+- Slurm submission script committed to `suli2026_pid/slurm/`.
+- Analysis-channel ntuple for `ep → e' p K+ X` produced and validated (e, p, K+ kinematic distributions look sane).
 - Train/val/test split locked. File lists in repo.
-- Baseline contamination numbers on the test set documented in `/notes/baseline_final.md`.
+- Baseline contamination numbers on the test set documented in `notes/baseline_final.md`.
+- All Overleaf comments resolved or replied to. Report PDF compiles without errors. PI signs off on the draft.
 
 **Risks / dependencies.**
-- slurm jobs fail or queue indefinitely. Severity M. Mitigation: Cooper has used ifarm/slurm before. Run a 10-job test array first; scale up if it works.
-- Truth-matching efficiency on `clasdis` not what Connor reports (he used |Delta phi|<6°, |Delta theta|<2°). Severity L. Mitigation: log the match efficiency as a sanity number.
+- **Full-sample MC production takes longer than expected.** The RICH-on `clasdis` sample is ~318 files at roughly 10 min each — approximately 50 CPU-hours total. This must be parallelized via a slurm array; a single interactive run is not feasible. Mitigation: submit the array early Monday. Maria helps set up the submission script if Cooper has not used slurm arrays before. If the queue is slow, run a 10-job test array first to validate the script, then submit the full array.
+- **Data sample is not cached or access is slow.** Files in `/cache/` may need to be staged from tape. Severity M. Mitigation: check file availability with `ls -lh` on the target directory at the start of the week; if files need staging, submit the staging request immediately and work on the audit and report while waiting.
+- slurm jobs fail or queue indefinitely. Severity M. Mitigation: run a small test array (5–10 jobs) before submitting the full batch. Check output logs before assuming all jobs completed.
+- Truth-matching efficiency on `clasdis` not what Connor reports (he used |Δφ| < 6°, |Δθ| < 2°). Severity L. Mitigation: log the match efficiency as a sanity number.
+- Report polish takes longer than expected if many Overleaf comments require substantive revisions. Severity M. Mitigation: address comments in priority order — physics content first, prose last. A clean compile with all comments resolved is the minimum bar.
 
-**Fallback / scope-down.** If full-sample processing exceeds Friday, proceed to Week 4 with the partial sample (whatever was done in Week 1-2 plus what completes). Re-run later in the background.
+**Fallback / scope-down.** If full-sample MC processing does not complete by Friday, proceed to Week 4 with whatever is on disk and re-run the remainder in the background. Do not block Week 4 on ntuple completion. If the report draft is not signed off by Friday, carry the final PI sign-off into the first day of Week 4.
 
 ---
 
