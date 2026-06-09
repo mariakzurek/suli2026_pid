@@ -160,6 +160,11 @@ species.  The generic engine stays generic; this script encodes the
 project-specific workflow: species pid cut, MC truth-match mode, and the
 provenance README that makes each audit output directory self-documenting.
 
+The full per-column glossary for `feature_audit_summary.csv` lives at
+`figures/feature_audit/COLUMNS.md`. Start there if you're new to the audit
+output — it groups the ~25 CSV columns into "what to look at," "what explains
+the decision," and "sanity checks" tiers with plain-language definitions.
+
 ### Species aliases
 
 | Alias | PID    | Human label |
@@ -180,6 +185,15 @@ provenance README that makes each audit output directory self-documenting.
 | `off`     | `pid == SPEC` | When truth matching is suspect, or for apples-to-apples with data without imposing extra MC quality cuts. |
 
 Data selection is always `pid == SPEC` regardless of truth mode (data has no `mc_matching_pid`).
+
+### Vertex-z cut flags
+
+| Flag | Description |
+|------|-------------|
+| `--vz-cut MIN MAX` | Apply a vertex-z window cut (exclusive bounds, in cm) to both MC and data after the species/truth-match filter. Default: `-8 2` (i.e., `-8 < vz < 2 cm`), matching the standard SULI target-window definition. |
+| `--no-vz-cut` | Disable the vertex-z cut entirely. If both `--no-vz-cut` and `--vz-cut` are supplied, `--no-vz-cut` wins and a warning is printed. |
+
+The cut is recorded in the per-run `README.md` written into the output directory.
 
 ### Canonical invocation
 
