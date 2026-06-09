@@ -25,22 +25,25 @@ Typical usage on a pandas DataFrame
     )
     print(stats)
 
-Column map (processing_mc_pid_training.groovy, 54 columns)
+Column map (processing_mc_pid_training.groovy, 53 columns)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   Event-level (1-8):   runnum, evnum, helicity, Q2, W, x, y, nu
   Per-track (9-15):    pid, p, theta, phi, vz, sector, status
-  ML features (16-31): beta, chi2pid,
+  ML features (16-30): beta, chi2pid,
                         ftof_energy_1A, ftof_energy_1B,
                         ftof_time_1A,   ftof_time_1B,
                         ftof_path_1A,   ftof_path_1B,
                         ecin_energy,    ecout_energy,
                         ecin_time,      ecout_time,
                         ecin_path,      ecout_path,
-                        nphe_htcc,      nphe_ltcc
-  PCAL + FTOF 2 (32-37): pcal_energy, pcal_time, pcal_path,
+                        nphe_htcc
+  PCAL + FTOF 2 (31-36): pcal_energy, pcal_time, pcal_path,
                           ftof_energy_2, ftof_time_2, ftof_path_2
-  RICH (38-51):  rich_emilay ... rich_best_ntot  (cross-check only)
-  MC truth (52-54): mc_matching_pid, mc_parent_pid, mc_match_quality
+  RICH (37-50):  rich_emilay ... rich_best_ntot  (cross-check only)
+  MC truth (51-53): mc_matching_pid, mc_parent_pid, mc_match_quality
+# Note: `nphe_ltcc` is documented in the original groovy spec but is not
+# currently emitted by `processing_mc_pid_training.groovy`.  Removed from
+# `ML_FEATURES` after a Week 3 audit run found the column absent.
 
 Missing-value convention
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -77,12 +80,22 @@ SENTINEL_HIGH =  9999   # used only for chi2pid (EB couldn't compute a pull)
 # p-value < 1e-4 on the KS test.
 KS_FLAG_THRESHOLD = 0.05
 
+# Drift-metric thresholds for the generic data/MC audit.
+# Each metric maps to a KEEP/CANDIDATE/DROP decision via tier boundaries.
+# A variable is DROP if >= 2 metrics flag DROP; CANDIDATE if any one does; else KEEP.
+PSI_KEEP_MAX         = 0.10   # PSI < 0.10  → KEEP
+PSI_CANDIDATE_MAX    = 0.25   # 0.10 ≤ PSI < 0.25 → CANDIDATE; ≥ 0.25 → DROP
+WNORM_KEEP_MAX       = 0.05   # W₁/IQR < 0.05 → KEEP
+WNORM_CANDIDATE_MAX  = 0.20   # 0.05–0.20 → CANDIDATE; ≥ 0.20 → DROP
+MAXRES_KEEP_MAX      = 0.30   # max-local-residual < 0.30 → KEEP
+MAXRES_CANDIDATE_MAX = 0.80   # 0.30–0.80 → CANDIDATE; ≥ 0.80 → DROP
+
 # Default colour palette: MC in blue, Data in orange, matching the physics
 # convention established in plot_all_variables.py.
 COLOR_MC   = "steelblue"
 COLOR_DATA = "darkorange"
 
-# Feature groups, in the order used by the groovy ntuple (columns 16-37).
+# Feature groups, in the order used by the groovy ntuple (columns 16-30).
 # These are the variables Cooper audits in Task 3a.
 ML_FEATURES = [
     "beta", "chi2pid",
@@ -92,7 +105,7 @@ ML_FEATURES = [
     "ecin_energy",    "ecout_energy",
     "ecin_time",      "ecout_time",
     "ecin_path",      "ecout_path",
-    "nphe_htcc",      "nphe_ltcc",
+    "nphe_htcc",
 ]
 
 CANDIDATE_FEATURES = [
@@ -407,6 +420,458 @@ def ks_test(mc_array, data_array):
     return float(result.statistic), float(result.pvalue)
 
 
+def _quantile_bin_edges(mc_array, data_array, n_quantile_bins=20):
+    """
+    Return unique quantile bin edges from the combined sample, or None if
+    the result is degenerate (fewer than 2 unique edges).
+
+    Edges are computed from ``np.linspace(0, 1, n_quantile_bins + 1)``
+    quantiles of the concatenated MC + data array.  The leftmost edge is
+    nudged left by 1e-9 and the rightmost edge right by 1e-9 so that
+    ``np.histogram`` captures every sample point including the extremes.
+    Duplicate edges (which arise for constant or near-constant variables
+    such as ``sector``) are collapsed with ``np.unique``.
+
+    This is a private helper shared by ``psi_score`` and
+    ``max_local_residual`` to avoid code duplication.  It is not part of
+    the public API.
+
+    Parameters
+    ----------
+    mc_array : np.ndarray
+        1-D array of MC values (sentinels already removed).
+    data_array : np.ndarray
+        1-D array of data values (sentinels already removed).
+    n_quantile_bins : int
+        Number of quantile bins requested.  Default 20.
+
+    Returns
+    -------
+    edges : np.ndarray or None
+        Unique bin edges with nudged endpoints, or None if fewer than 2
+        unique edges exist (degenerate input).
+    """
+    combined = np.concatenate([mc_array, data_array])
+    raw_edges = np.quantile(combined, np.linspace(0, 1, n_quantile_bins + 1))
+    # Nudge endpoints outward by a tiny amount so np.histogram includes
+    # the minimum and maximum sample values in the outermost bins.
+    raw_edges[0]  -= 1e-9
+    raw_edges[-1] += 1e-9
+    edges = np.unique(raw_edges)
+    if len(edges) < 2:
+        return None
+    return edges
+
+
+def wasserstein_normalized(mc_array, data_array):
+    """
+    Compute the Wasserstein-1 distance between MC and data, normalised by
+    the interquartile range (IQR) of the data sample.
+
+    WHAT IT DOES
+    ------------
+    The Wasserstein-1 distance (also known as the Earth Mover's Distance)
+    measures how much "work" is needed to transform the MC distribution into
+    the data distribution, where work is the product of mass moved times
+    the distance moved.  Formally:
+
+        W₁(MC, Data) = inf_{γ ∈ Γ(MC,Data)}  E_{(x,y)~γ}[|x - y|]
+
+    The raw W₁ is in the native units of the variable (e.g. GeV/c for
+    momentum, degrees for angles).  Dividing by the data IQR makes the
+    result dimensionless and comparable across variables with very different
+    scales: a normalised distance of 0.10 means "the distributions are
+    offset by one-tenth of the central 50% of the data range", which has the
+    same practical meaning whether the variable is beta or ecal energy.
+
+    Unlike KS, Wasserstein is sensitive to both location shifts and shape
+    changes across the full distribution (not just the point of maximum CDF
+    difference).  It is particularly good at detecting bulk shifts that KS
+    might underweight.
+
+    WHEN TO USE IT
+    --------------
+    Use W₁/IQR as the primary cross-variable drift screen.  Because it is
+    dimensionless and scale-free, a single threshold works for all variables:
+    values below 0.05 indicate tight agreement, 0.05–0.20 moderate drift,
+    and above 0.20 poor agreement warranting visual inspection and potential
+    exclusion.  Combine with ``psi_score`` and ``max_local_residual`` for a
+    three-metric consensus decision via ``classify_drift``.
+
+    PITFALLS
+    --------
+    * If the data IQR is zero (a degenerate or constant variable), the
+      function falls back to the IQR of the combined sample.  If that is
+      also zero, it returns NaN with a RuntimeWarning.
+    * Wasserstein can underweight tail differences if the tails carry very
+      little mass.  For tail-sensitive PID variables (e.g. beta tails that
+      separate pions from kaons), cross-check with ``max_local_residual``.
+    * The raw W₁ value depends on the variable's scale and cannot be
+      compared across variables.  Always use the normalised version
+      (second return value) for cross-variable comparisons.
+
+    Suggested thresholds (normalised W₁/IQR):
+      < 0.05  → tight agreement
+      0.05–0.20 → moderate drift
+      > 0.20  → poor agreement
+
+    Parameters
+    ----------
+    mc_array : array-like
+        1-D array of MC values for the variable (sentinels already removed).
+    data_array : array-like
+        1-D array of data values for the variable (sentinels already removed).
+
+    Returns
+    -------
+    w_raw : float
+        Raw Wasserstein-1 distance in the variable's native units.
+    w_norm : float
+        W₁ divided by the data IQR (dimensionless).  NaN if IQR and the
+        combined IQR are both zero.
+    """
+    mc_arr   = np.asarray(mc_array,   dtype=float)
+    data_arr = np.asarray(data_array, dtype=float)
+
+    if len(mc_arr) == 0 or len(data_arr) == 0:
+        warnings.warn(
+            "wasserstein_normalized: one or both arrays are empty — returning NaN.",
+            RuntimeWarning, stacklevel=2,
+        )
+        return np.nan, np.nan
+
+    w_raw = float(sp_stats.wasserstein_distance(mc_arr, data_arr))
+
+    # IQR of the data sample; fall back to combined IQR if data IQR is zero.
+    iqr_data = float(np.subtract(*np.percentile(data_arr, [75, 25])))
+    if iqr_data == 0.0:
+        combined = np.concatenate([mc_arr, data_arr])
+        iqr_data = float(np.subtract(*np.percentile(combined, [75, 25])))
+    if iqr_data == 0.0:
+        warnings.warn(
+            "wasserstein_normalized: IQR is zero for both data and combined "
+            "sample (degenerate variable) — w_norm is NaN.",
+            RuntimeWarning, stacklevel=2,
+        )
+        return w_raw, np.nan
+
+    w_norm = w_raw / iqr_data
+    return w_raw, w_norm
+
+
+def psi_score(mc_array, data_array, n_quantile_bins=20):
+    """
+    Population Stability Index (PSI) comparing MC and data distributions
+    using adaptive quantile binning.
+
+    WHAT IT DOES
+    ------------
+    PSI is the standard ML feature-drift metric used in model monitoring.
+    It answers the question "has the distribution of this variable shifted
+    since the model was trained?"  The formula is:
+
+        PSI = Σ_i  (q_i − p_i) · ln(q_i / p_i)
+
+    where p_i = fraction of MC events in bin i and q_i = fraction of data
+    events in bin i.  Bins are defined by quantiles of the *combined*
+    (MC + data) sample, so no per-variable range tuning is ever needed.
+    Quantile binning auto-adapts to any variable: narrow bins appear in
+    dense regions of the distribution and wide bins in sparse tails, giving
+    roughly equal sensitivity everywhere.
+
+    PSI ≥ 0 always (it is a sum of KL-divergence-like terms), and PSI = 0
+    when the MC and data proportions are identical in every bin.
+
+    WHEN TO USE IT
+    --------------
+    Use PSI as the second pillar of the cross-variable drift screen alongside
+    ``wasserstein_normalized`` and ``max_local_residual``.  Because the
+    industry thresholds are universally recognised (<0.1 stable, 0.1–0.25
+    moderate, >0.25 significant), PSI gives an immediately interpretable
+    number that a physicist unfamiliar with KS tests can also understand.
+
+    PITFALLS
+    --------
+    * PSI averages drift across all bins.  A variable that disagrees badly
+      in one tail but agrees in the body can have a modest PSI.  Pair with
+      ``max_local_residual`` to catch localised tail disagreements.
+    * Degenerate variables (all values equal, e.g. sector when only one
+      sector is selected) produce fewer than 2 unique quantile edges.  In
+      that case the function returns NaN with a RuntimeWarning.
+    * Both proportions are clipped to 1e-6 to avoid log(0).  This
+      introduces a tiny numerical bias for very empty bins, but the effect
+      is negligible compared to the statistical fluctuations in those bins.
+    * The sign of (q − p)·ln(q/p) is always non-negative because the sign
+      of (q − p) and ln(q/p) must agree.  Rounding can occasionally produce
+      a value of −1e-15; treat any PSI < 0 as zero.
+
+    Suggested thresholds (PSI):
+      < 0.10  → stable
+      0.10–0.25 → moderate drift
+      > 0.25  → significant drift
+
+    Parameters
+    ----------
+    mc_array : array-like
+        1-D array of MC values for the variable (sentinels already removed).
+    data_array : array-like
+        1-D array of data values for the variable (sentinels already removed).
+    n_quantile_bins : int
+        Number of quantile bins.  Default 20.  Increasing this gives finer
+        resolution at the cost of higher sensitivity to statistical noise in
+        sparse bins.
+
+    Returns
+    -------
+    psi : float
+        Population Stability Index.  NaN if either array is empty or if the
+        variable is degenerate (fewer than 2 unique quantile edges).
+    """
+    mc_arr   = np.asarray(mc_array,   dtype=float)
+    data_arr = np.asarray(data_array, dtype=float)
+
+    if len(mc_arr) == 0 or len(data_arr) == 0:
+        warnings.warn(
+            "psi_score: one or both arrays are empty — returning NaN.",
+            RuntimeWarning, stacklevel=2,
+        )
+        return np.nan
+
+    edges = _quantile_bin_edges(mc_arr, data_arr, n_quantile_bins)
+    if edges is None:
+        warnings.warn(
+            "psi_score: fewer than 2 unique quantile edges (degenerate variable) "
+            "— returning NaN.",
+            RuntimeWarning, stacklevel=2,
+        )
+        return np.nan
+
+    n_mc_bins,   _ = np.histogram(mc_arr,   bins=edges)
+    n_data_bins, _ = np.histogram(data_arr, bins=edges)
+
+    n_mc_total   = float(n_mc_bins.sum())
+    n_data_total = float(n_data_bins.sum())
+
+    # Guard against zero total (should not happen after empty-array check above,
+    # but be defensive in case all events fall outside the edge range).
+    if n_mc_total == 0.0 or n_data_total == 0.0:
+        warnings.warn(
+            "psi_score: all events fell outside the quantile edges — returning NaN.",
+            RuntimeWarning, stacklevel=2,
+        )
+        return np.nan
+
+    p_i = n_mc_bins.astype(float)   / n_mc_total    # MC proportions
+    q_i = n_data_bins.astype(float) / n_data_total  # data proportions
+
+    # Clip to avoid log(0); the clip floor is small enough to be negligible.
+    p_i = np.clip(p_i, 1e-6, None)
+    q_i = np.clip(q_i, 1e-6, None)
+
+    psi = float(np.sum((q_i - p_i) * np.log(q_i / p_i)))
+    return psi
+
+
+def max_local_residual(mc_array, data_array, n_quantile_bins=20):
+    """
+    Maximum relative local residual across quantile bins, identifying the
+    worst single region of MC/data disagreement.
+
+    WHAT IT DOES
+    ------------
+    Using the same adaptive quantile binning as ``psi_score``, this function
+    computes the per-bin relative discrepancy between data and MC proportions:
+
+        local_residual_i = |d_i − m_i| / max(m_i, 1e-6)
+
+    where m_i = fraction of MC events in bin i and d_i = fraction of data
+    events in bin i.  The function returns the maximum of this quantity over
+    all bins.  A value of 0.5 means that in the worst bin, the data fraction
+    differs from the MC fraction by 50% of the MC fraction — a substantial
+    local disagreement even if the global metrics look acceptable.
+
+    This metric catches the PID-relevant failure mode for variables like beta:
+    the bulk of the distribution (near β ≈ 1) may agree well, but the low-β
+    kaon/pion tail can differ dramatically.  PSI and Wasserstein would average
+    this tail difference across many bins and return a modest overall score,
+    while max_local_residual pinpoints it.
+
+    WHEN TO USE IT
+    --------------
+    Use as the third pillar of the drift screen alongside ``wasserstein_normalized``
+    and ``psi_score``.  Always inspect the flagged variable's overlay plot to
+    confirm that the high max_local_residual bin is physically significant and
+    not just a very-low-statistics edge bin.
+
+    PITFALLS
+    --------
+    * The metric is dominated by the single worst bin.  If that bin has very
+      few events, the large relative discrepancy is purely statistical.
+      Cross-check against the KS distance and PSI; if those are small, the
+      flagged bin is likely a fluctuation.
+    * The MC denominator is clipped at 1e-6 to avoid division by zero in bins
+      where the MC has no events.  A bin with zero MC and nonzero data will
+      produce a residual of d_i / 1e-6, which can be very large.  Inspect the
+      overlay to determine whether this represents a real acceptance problem.
+    * Degenerate variables (all values equal) return NaN with a RuntimeWarning,
+      same as ``psi_score``.
+
+    Suggested thresholds:
+      < 0.30  → tight agreement
+      0.30–0.80 → moderate local drift
+      > 0.80  → poor local agreement
+
+    Parameters
+    ----------
+    mc_array : array-like
+        1-D array of MC values for the variable (sentinels already removed).
+    data_array : array-like
+        1-D array of data values for the variable (sentinels already removed).
+    n_quantile_bins : int
+        Number of quantile bins.  Default 20.
+
+    Returns
+    -------
+    max_resid : float
+        Maximum over bins of |d_i − m_i| / clip(m_i, 1e-6, None).  NaN if
+        either array is empty or the variable is degenerate.
+    """
+    mc_arr   = np.asarray(mc_array,   dtype=float)
+    data_arr = np.asarray(data_array, dtype=float)
+
+    if len(mc_arr) == 0 or len(data_arr) == 0:
+        warnings.warn(
+            "max_local_residual: one or both arrays are empty — returning NaN.",
+            RuntimeWarning, stacklevel=2,
+        )
+        return np.nan
+
+    edges = _quantile_bin_edges(mc_arr, data_arr, n_quantile_bins)
+    if edges is None:
+        warnings.warn(
+            "max_local_residual: fewer than 2 unique quantile edges "
+            "(degenerate variable) — returning NaN.",
+            RuntimeWarning, stacklevel=2,
+        )
+        return np.nan
+
+    n_mc_bins,   _ = np.histogram(mc_arr,   bins=edges)
+    n_data_bins, _ = np.histogram(data_arr, bins=edges)
+
+    n_mc_total   = float(n_mc_bins.sum())
+    n_data_total = float(n_data_bins.sum())
+
+    if n_mc_total == 0.0 or n_data_total == 0.0:
+        warnings.warn(
+            "max_local_residual: all events fell outside quantile edges — returning NaN.",
+            RuntimeWarning, stacklevel=2,
+        )
+        return np.nan
+
+    m = n_mc_bins.astype(float)   / n_mc_total
+    d = n_data_bins.astype(float) / n_data_total
+
+    max_resid = float(np.max(np.abs(d - m) / np.clip(m, 1e-6, None)))
+    return max_resid
+
+
+def classify_drift(psi, w_norm, max_resid):
+    """
+    Map the three generic drift metrics onto a KEEP / CANDIDATE / DROP
+    decision using a two-out-of-three majority rule for DROP.
+
+    WHAT IT DOES
+    ------------
+    Each of the three drift metrics (PSI, normalised Wasserstein, and
+    max-local-residual) is classified independently against its own tier
+    thresholds (see the module-level constants PSI_KEEP_MAX,
+    PSI_CANDIDATE_MAX, WNORM_KEEP_MAX, WNORM_CANDIDATE_MAX,
+    MAXRES_KEEP_MAX, MAXRES_CANDIDATE_MAX).  The per-metric tiers are:
+
+        KEEP      — value is below the KEEP threshold for that metric
+        CANDIDATE — value is between the KEEP and CANDIDATE thresholds
+        DROP      — value is at or above the CANDIDATE threshold
+
+    The combined decision follows three rules, applied in order:
+
+    1. DROP    — at least two of the three non-NaN metrics flag DROP.
+    2. CANDIDATE — at least one non-NaN metric flags CANDIDATE or DROP.
+    3. KEEP    — all non-NaN metrics flag KEEP.
+    4. UNKNOWN — all three metrics are NaN (no evidence either way).
+
+    The two-out-of-three rule for DROP makes the decision robust against
+    a single metric misfiring on an unusual distribution (e.g. a variable
+    that is genuinely degenerate in one metric but fine in the others).
+    The CANDIDATE promotion on any single flag errs on the side of caution:
+    a variable that looks bad by any one measure deserves visual inspection
+    before being included in training.
+
+    WHEN TO USE IT
+    --------------
+    Call this after computing ``psi_score``, ``wasserstein_normalized``, and
+    ``max_local_residual`` for a given variable and (p, θ) slice.  The
+    returned string is stored as ``drift_decision`` in the stats dict produced
+    by ``compare_distribution`` and summarised in the CLI table.
+
+    PITFALLS
+    --------
+    * NaN metrics are treated as missing and do not contribute to the DROP
+      count.  If two metrics are NaN and one flags DROP, the result is
+      CANDIDATE, not DROP (only one valid metric fired DROP, which is below
+      the two-out-of-three threshold).
+    * The thresholds were chosen pragmatically for CLAS12 electron-PID
+      variables.  If you apply this tool to a very different physics context,
+      recalibrate the module-level constants before trusting the decisions.
+    * This function returns a string, not an integer severity level.  If you
+      want to sort or aggregate decisions across slices, use the helper
+      ordering DROP > CANDIDATE > KEEP > UNKNOWN explicitly.
+
+    Parameters
+    ----------
+    psi : float
+        Population Stability Index from ``psi_score``.  May be NaN.
+    w_norm : float
+        Normalised Wasserstein distance from ``wasserstein_normalized``.
+        May be NaN.
+    max_resid : float
+        Maximum local residual from ``max_local_residual``.  May be NaN.
+
+    Returns
+    -------
+    str
+        One of ``'KEEP'``, ``'CANDIDATE'``, ``'DROP'``, or ``'UNKNOWN'``.
+    """
+    def _tier(value, keep_max, cand_max):
+        """Classify a single metric value into KEEP/CANDIDATE/DROP."""
+        if not np.isfinite(value):
+            return None          # missing — skip in voting
+        if value < keep_max:
+            return "KEEP"
+        if value < cand_max:
+            return "CANDIDATE"
+        return "DROP"
+
+    tiers = [
+        _tier(psi,       PSI_KEEP_MAX,    PSI_CANDIDATE_MAX),
+        _tier(w_norm,    WNORM_KEEP_MAX,  WNORM_CANDIDATE_MAX),
+        _tier(max_resid, MAXRES_KEEP_MAX, MAXRES_CANDIDATE_MAX),
+    ]
+
+    # Filter out None (missing metrics)
+    valid = [t for t in tiers if t is not None]
+    if not valid:
+        return "UNKNOWN"
+
+    n_drop = sum(1 for t in valid if t == "DROP")
+    if n_drop >= 2:
+        return "DROP"
+
+    if any(t in ("CANDIDATE", "DROP") for t in valid):
+        return "CANDIDATE"
+
+    return "KEEP"
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Sentinel stripping
 # ──────────────────────────────────────────────────────────────────────────────
@@ -529,42 +994,128 @@ def compare_distribution(
     -------
     stats : dict
         Keys:
-          'variable'       : str   — the variable name
-          'n_mc'           : int   — number of MC events after selection + sentinel strip
-          'n_data'         : int   — number of data events after selection + sentinel strip
-          'hit_frac_mc'    : float — fraction of MC rows with a non-sentinel value
-                                     (before the (p,θ) selection, so it reflects
-                                     detector acceptance, not the slice)
-          'hit_frac_data'  : float — same for data
-          'ks_distance'    : float — KS statistic D
-          'ks_pvalue'      : float — KS p-value
-          'chi2'           : float — chi-squared statistic
-          'ndof'           : int   — degrees of freedom
-          'chi2_per_ndof'  : float — chi2 / ndof (near 1 = good agreement)
-          'chi2_pvalue'    : float — chi-squared p-value
-          'mean_rel_diff'  : float — mean of |rel_diff| over non-NaN bins
-          'max_abs_rel_diff': float — max of |rel_diff| over non-NaN bins
-          'ks_flag'        : bool  — True if ks_distance > KS_FLAG_THRESHOLD (0.05)
+          'variable'          : str   — the variable name
+          'n_mc'              : int   — number of MC events after selection + sentinel strip
+          'n_data'            : int   — number of data events after selection + sentinel strip
+          'hit_frac_mc'       : float — fraction of MC rows with a non-sentinel value
+                                        computed on the *parent* DataFrame before any (p,θ)
+                                        selection; reflects global detector acceptance.
+          'hit_frac_data'     : float — same for data, on the full parent DataFrame.
+          'n_total_mc_cell'   : int   — total MC rows in this (p,θ) cell (after selection,
+                                        before sentinel strip).
+          'n_total_data_cell' : int   — total data rows in this (p,θ) cell.
+          'n_hit_mc_cell'     : int   — MC rows in this cell with a valid (non-sentinel) value.
+          'n_hit_data_cell'   : int   — data rows in this cell with a valid (non-sentinel) value.
+          'hit_frac_mc_cell'  : float — n_hit_mc_cell / n_total_mc_cell; fraction of K⁺ tracks
+                                        in this kinematic cell that had a recorded value.
+                                        NaN if the cell is empty.
+          'hit_frac_data_cell': float — same for data.
+          'hit_frac_delta'    : float — hit_frac_data_cell − hit_frac_mc_cell; positive means
+                                        data fires more often than MC.  NaN if either cell
+                                        fraction is NaN.  |Δ| > 0.05 flags a hit-fraction
+                                        mismatch that should be reviewed before trusting the
+                                        shape comparison for this cell.
+          'ks_distance'       : float — KS statistic D
+          'ks_pvalue'         : float — KS p-value
+          'chi2'              : float — chi-squared statistic
+          'ndof'              : int   — degrees of freedom
+          'chi2_per_ndof'     : float — chi2 / ndof (near 1 = good agreement)
+          'chi2_pvalue'       : float — chi-squared p-value
+          'mean_rel_diff'     : float — mean of |rel_diff| over non-NaN bins
+          'max_abs_rel_diff'  : float — max of |rel_diff| over non-NaN bins
+          'ks_flag'           : bool  — True if ks_distance > KS_FLAG_THRESHOLD (0.05)
+          'wasserstein'       : float — raw Wasserstein-1 distance in native units
+          'wasserstein_norm'  : float — W₁ divided by data IQR (dimensionless)
+          'psi'               : float — Population Stability Index (quantile bins)
+          'max_local_residual': float — max per-bin |d_i - m_i| / clip(m_i, 1e-6)
+          'drift_decision'    : str   — 'KEEP', 'CANDIDATE', 'DROP', or 'UNKNOWN'
+                                        (from classify_drift applied to psi,
+                                        wasserstein_norm, max_local_residual)
+          'status'            : str   — processing outcome:
+                                          'ok'             — normal run, all metrics computed
+                                          'missing_column' — variable absent from MC or data;
+                                                             all metric fields are NaN
+                                          'empty'          — variable present but no valid
+                                                             entries after sentinel strip
+
+        **Global vs per-cell hit fractions.**  ``hit_frac_mc`` and
+        ``hit_frac_data`` are computed on the *parent* DataFrame passed to this
+        function (i.e. before the (p, θ) selection masks are applied).  They
+        reflect global detector acceptance — how often the detector recorded a
+        value for this variable across the entire species-selected sample.
+        ``hit_frac_mc_cell`` and ``hit_frac_data_cell`` are computed on the
+        already-sliced subset and answer a different question: what fraction of
+        K⁺ tracks *in this kinematic cell* actually had a recorded value for
+        this variable?  ``hit_frac_delta = hit_frac_data_cell −
+        hit_frac_mc_cell`` is the audit-relevant number: a large delta means
+        MC and data disagree on how often the detector fired in this region,
+        which is a more dangerous form of mismatch than a shape disagreement on
+        tracks that did fire (the shape comparison is meaningless if the
+        populations that produced hits are systematically different).  Flag any
+        cell where |hit_frac_delta| > 0.05 for review before trusting its drift
+        decision.
     """
     # ── 1. Apply selections ───────────────────────────────────────────────────
     df_mc_sel   = df_mc   if selection_mc   is None else df_mc[selection_mc]
     df_data_sel = df_data if selection_data is None else df_data[selection_data]
 
     # ── 2. Extract the column ─────────────────────────────────────────────────
-    if variable not in df_mc_sel.columns:
-        raise KeyError(f"Variable '{variable}' not found in df_mc columns: "
-                       f"{list(df_mc_sel.columns)}")
-    if variable not in df_data_sel.columns:
-        raise KeyError(f"Variable '{variable}' not found in df_data columns: "
-                       f"{list(df_data_sel.columns)}")
+    mc_missing   = variable not in df_mc.columns
+    data_missing = variable not in df_data.columns
+    if mc_missing or data_missing:
+        missing_in = []
+        if mc_missing:
+            missing_in.append("df_mc")
+        if data_missing:
+            missing_in.append("df_data")
+        warnings.warn(
+            f"compare_distribution: variable '{variable}' not found in "
+            f"{' and '.join(missing_in)} — skipping.",
+            RuntimeWarning, stacklevel=2,
+        )
+        result = _empty_stats(variable, 0, 0)
+        result["status"] = "missing_column"
+        return result
 
     raw_mc   = df_mc_sel[variable].to_numpy(dtype=float)
     raw_data = df_data_sel[variable].to_numpy(dtype=float)
 
-    # Hit-fraction computed on the full (unsliced) DataFrame so that it
-    # reflects detector acceptance rather than the kinematic slice.
-    hit_frac_mc   = float(np.mean(df_mc[variable].to_numpy(dtype=float) != SENTINEL_LOW))
-    hit_frac_data = float(np.mean(df_data[variable].to_numpy(dtype=float) != SENTINEL_LOW))
+    # Global hit-fraction computed on the full (unsliced) parent DataFrame so
+    # that it reflects detector acceptance irrespective of any (p, θ) slice.
+    # For chi2pid, both sentinel values are excluded.
+    _global_mc_arr   = df_mc[variable].to_numpy(dtype=float)
+    _global_data_arr = df_data[variable].to_numpy(dtype=float)
+    if variable == "chi2pid":
+        hit_frac_mc   = float(np.mean(
+            (_global_mc_arr   != SENTINEL_LOW) & (_global_mc_arr   != SENTINEL_HIGH)))
+        hit_frac_data = float(np.mean(
+            (_global_data_arr != SENTINEL_LOW) & (_global_data_arr != SENTINEL_HIGH)))
+    else:
+        hit_frac_mc   = float(np.mean(_global_mc_arr   != SENTINEL_LOW))
+        hit_frac_data = float(np.mean(_global_data_arr != SENTINEL_LOW))
+
+    # Per-cell hit-fraction: fraction of rows in the selected (p, θ) cell
+    # that have a valid (non-sentinel) value for this variable.  This is the
+    # audit-relevant number: a large MC/data delta means the detector fired at
+    # different rates in this kinematic region, which is a more dangerous form
+    # of mismatch than a shape disagreement on tracks that did fire.
+    n_total_mc_cell   = len(df_mc_sel)
+    n_total_data_cell = len(df_data_sel)
+    if variable == "chi2pid":
+        n_hit_mc_cell   = int(np.sum(
+            (raw_mc   != SENTINEL_LOW) & (raw_mc   != SENTINEL_HIGH)))
+        n_hit_data_cell = int(np.sum(
+            (raw_data != SENTINEL_LOW) & (raw_data != SENTINEL_HIGH)))
+    else:
+        n_hit_mc_cell   = int(np.sum(raw_mc   != SENTINEL_LOW))
+        n_hit_data_cell = int(np.sum(raw_data != SENTINEL_LOW))
+    hit_frac_mc_cell   = (n_hit_mc_cell   / n_total_mc_cell
+                          if n_total_mc_cell   > 0 else np.nan)
+    hit_frac_data_cell = (n_hit_data_cell / n_total_data_cell
+                          if n_total_data_cell > 0 else np.nan)
+    hit_frac_delta     = (hit_frac_data_cell - hit_frac_mc_cell
+                          if (np.isfinite(hit_frac_mc_cell) and
+                              np.isfinite(hit_frac_data_cell)) else np.nan)
 
     # ── 3. Strip sentinels ────────────────────────────────────────────────────
     arr_mc   = _strip_sentinels(raw_mc,   variable)
@@ -577,7 +1128,7 @@ def compare_distribution(
             warnings.warn(f"compare_distribution: no valid data for '{variable}' "
                           "after sentinel removal.  Returning empty stats.",
                           RuntimeWarning, stacklevel=2)
-            return _empty_stats(variable, 0, 0)
+            return _empty_stats(variable, 0, 0)  # status="empty" set inside _empty_stats
         plo = float(np.percentile(combined, 1))
         phi = float(np.percentile(combined, 99))
         if plo == phi:
@@ -640,21 +1191,41 @@ def compare_distribution(
     mean_rel_diff     = float(np.mean(np.abs(finite_rd)))   if len(finite_rd) > 0 else np.nan
     max_abs_rel_diff  = float(np.max(np.abs(finite_rd)))    if len(finite_rd) > 0 else np.nan
 
+    # Generic scale-free drift metrics — operate on the raw event arrays,
+    # same as KS.  Warnings from these calls are non-fatal; NaN propagates.
+    w_raw, w_norm  = wasserstein_normalized(arr_mc, arr_data)
+    psi_val        = psi_score(arr_mc, arr_data)
+    max_resid_val  = max_local_residual(arr_mc, arr_data)
+    drift_dec      = classify_drift(psi_val, w_norm, max_resid_val)
+
     stats = {
-        "variable"        : variable,
-        "n_mc"            : len(arr_mc),
-        "n_data"          : len(arr_data),
-        "hit_frac_mc"     : hit_frac_mc,
-        "hit_frac_data"   : hit_frac_data,
-        "ks_distance"     : ks_dist,
-        "ks_pvalue"       : ks_pval,
-        "chi2"            : chi2_val,
-        "ndof"            : ndof,
-        "chi2_per_ndof"   : chi2_per_ndof,
-        "chi2_pvalue"     : chi2_pval,
-        "mean_rel_diff"   : mean_rel_diff,
-        "max_abs_rel_diff": max_abs_rel_diff,
-        "ks_flag"         : (ks_dist > KS_FLAG_THRESHOLD) if np.isfinite(ks_dist) else False,
+        "variable"           : variable,
+        "n_mc"               : len(arr_mc),
+        "n_data"             : len(arr_data),
+        "hit_frac_mc"        : hit_frac_mc,
+        "hit_frac_data"      : hit_frac_data,
+        "n_total_mc_cell"    : n_total_mc_cell,
+        "n_total_data_cell"  : n_total_data_cell,
+        "n_hit_mc_cell"      : n_hit_mc_cell,
+        "n_hit_data_cell"    : n_hit_data_cell,
+        "hit_frac_mc_cell"   : hit_frac_mc_cell,
+        "hit_frac_data_cell" : hit_frac_data_cell,
+        "hit_frac_delta"     : hit_frac_delta,
+        "ks_distance"        : ks_dist,
+        "ks_pvalue"          : ks_pval,
+        "chi2"               : chi2_val,
+        "ndof"               : ndof,
+        "chi2_per_ndof"      : chi2_per_ndof,
+        "chi2_pvalue"        : chi2_pval,
+        "mean_rel_diff"      : mean_rel_diff,
+        "max_abs_rel_diff"   : max_abs_rel_diff,
+        "ks_flag"            : (ks_dist > KS_FLAG_THRESHOLD) if np.isfinite(ks_dist) else False,
+        "wasserstein"        : w_raw,
+        "wasserstein_norm"   : w_norm,
+        "psi"                : psi_val,
+        "max_local_residual" : max_resid_val,
+        "drift_decision"     : drift_dec,
+        "status"             : "ok",
     }
 
     # ── 7. Build figure ───────────────────────────────────────────────────────
@@ -691,7 +1262,9 @@ def compare_distribution(
     ax_top.set_xlim(hist_range)
     ax_top.tick_params(labelbottom=False)
 
-    # Statistics annotation in top-right corner
+    # Statistics annotation in top-right corner.
+    # Line 1: legacy KS + chi² summary (unchanged for backward compatibility).
+    # Line 2: new generic drift metrics + combined decision.
     if np.isfinite(ks_dist):
         ks_str = f"KS D = {ks_dist:.4f}"
         ks_str += " ⚑" if stats["ks_flag"] else ""
@@ -703,7 +1276,25 @@ def compare_distribution(
     else:
         chi2_str = "χ²/ndof = N/A"
 
-    annotation = f"{ks_str}\n{chi2_str}"
+    psi_ann   = f"{psi_val:.3f}"   if np.isfinite(psi_val)       else "N/A"
+    wnorm_ann = f"{w_norm:.3f}"    if np.isfinite(w_norm)         else "N/A"
+    mres_ann  = f"{max_resid_val:.2f}" if np.isfinite(max_resid_val) else "N/A"
+    drift_str = (f"PSI={psi_ann} | W/IQR={wnorm_ann} | "
+                 f"maxR={mres_ann} | {drift_dec}")
+
+    # Per-cell hit-fraction line (line 3 of annotation box).
+    hmc_ann  = f"{hit_frac_mc_cell:.3f}"  if np.isfinite(hit_frac_mc_cell)  else "N/A"
+    hdat_ann = f"{hit_frac_data_cell:.3f}" if np.isfinite(hit_frac_data_cell) else "N/A"
+    if np.isfinite(hit_frac_delta):
+        sign = "+" if hit_frac_delta >= 0 else ""
+        hdelta_ann = f"{sign}{hit_frac_delta:.3f}"
+        hit_flag   = " ⚑" if abs(hit_frac_delta) > 0.05 else ""
+    else:
+        hdelta_ann = "N/A"
+        hit_flag   = ""
+    hit_str = f"hit MC/Data = {hmc_ann}/{hdat_ann} (Δ = {hdelta_ann}){hit_flag}"
+
+    annotation = f"{ks_str}\n{chi2_str}\n{drift_str}\n{hit_str}"
     ax_top.text(
         0.98, 0.97, annotation,
         transform=ax_top.transAxes, ha="right", va="top",
@@ -748,22 +1339,41 @@ def compare_distribution(
 
 
 def _empty_stats(variable, n_mc, n_data):
-    """Return a stats dict populated with NaN values (empty-data guard)."""
+    """Return a stats dict populated with NaN values (empty-data guard).
+
+    The ``status`` key is set to ``'empty'`` to indicate that the variable
+    was present in both DataFrames but had no valid entries after sentinel
+    removal.  Callers that detect a missing column should overwrite
+    ``status`` with ``'missing_column'`` before returning.
+    """
     return {
-        "variable"        : variable,
-        "n_mc"            : n_mc,
-        "n_data"          : n_data,
-        "hit_frac_mc"     : np.nan,
-        "hit_frac_data"   : np.nan,
-        "ks_distance"     : np.nan,
-        "ks_pvalue"       : np.nan,
-        "chi2"            : np.nan,
-        "ndof"            : 0,
-        "chi2_per_ndof"   : np.nan,
-        "chi2_pvalue"     : np.nan,
-        "mean_rel_diff"   : np.nan,
-        "max_abs_rel_diff": np.nan,
-        "ks_flag"         : False,
+        "variable"           : variable,
+        "n_mc"               : n_mc,
+        "n_data"             : n_data,
+        "hit_frac_mc"        : np.nan,
+        "hit_frac_data"      : np.nan,
+        "n_total_mc_cell"    : 0,
+        "n_total_data_cell"  : 0,
+        "n_hit_mc_cell"      : 0,
+        "n_hit_data_cell"    : 0,
+        "hit_frac_mc_cell"   : np.nan,
+        "hit_frac_data_cell" : np.nan,
+        "hit_frac_delta"     : np.nan,
+        "ks_distance"        : np.nan,
+        "ks_pvalue"          : np.nan,
+        "chi2"               : np.nan,
+        "ndof"               : 0,
+        "chi2_per_ndof"      : np.nan,
+        "chi2_pvalue"        : np.nan,
+        "mean_rel_diff"      : np.nan,
+        "max_abs_rel_diff"   : np.nan,
+        "ks_flag"            : False,
+        "wasserstein"        : np.nan,
+        "wasserstein_norm"   : np.nan,
+        "psi"                : np.nan,
+        "max_local_residual" : np.nan,
+        "drift_decision"     : "UNKNOWN",
+        "status"             : "empty",
     }
 
 
@@ -835,12 +1445,16 @@ def run_feature_audit(
             raise KeyError(f"run_feature_audit requires column '{col}' in df_data")
 
     rows = []
+    skipped_vars = []
 
     for var in variables:
         var_dir = os.path.join(output_dir, var)
         os.makedirs(var_dir, exist_ok=True)
 
+        var_skipped = False
         for (p_lo, p_hi) in p_bins:
+            if var_skipped:
+                break
             for (t_lo, t_hi) in theta_bins:
                 sel_mc = (
                     (df_mc["p"] > p_lo) & (df_mc["p"] <= p_hi) &
@@ -866,11 +1480,27 @@ def run_feature_audit(
                     save_path=save_path,
                 )
 
+                if st.get("status") == "missing_column":
+                    print(f"  {var:30s}  SKIPPED  (column not present in MC or data)")
+                    skipped_vars.append(var)
+                    # Record the first (and only) missing-column row so the CSV
+                    # is a complete record of what was attempted.
+                    row = dict(p_lo=p_lo, p_hi=p_hi, theta_lo=t_lo, theta_hi=t_hi)
+                    row.update(st)
+                    rows.append(row)
+                    var_skipped = True
+                    break
+
                 row = dict(p_lo=p_lo, p_hi=p_hi, theta_lo=t_lo, theta_hi=t_hi)
                 row.update(st)
                 rows.append(row)
 
-        print(f"  {var:30s}  done  ({len(p_bins) * len(theta_bins)} slices)")
+        if not var_skipped:
+            print(f"  {var:30s}  done  ({len(p_bins) * len(theta_bins)} slices)")
+
+    if skipped_vars:
+        print(f"\nSkipped {len(skipped_vars)} variable(s) due to missing columns: "
+              f"{skipped_vars}")
 
     summary = pd.DataFrame(rows)
     # Reorder columns so variable comes first
@@ -879,6 +1509,84 @@ def run_feature_audit(
     ]
     summary = summary[cols]
     return summary
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Shared summary-table printer (used by main() and audit_species.py)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def print_summary_table(summary, variables, threshold_str=None):
+    """
+    Print the per-variable summary table to stdout.
+
+    Shows the worst-across-cells values for each metric and the overall drift
+    decision for every variable in ``variables``.  Variables that were skipped
+    due to a missing column are printed as SKIPPED.
+
+    Parameters
+    ----------
+    summary : pd.DataFrame
+        The DataFrame returned by ``run_feature_audit``.
+    variables : list of str
+        Ordered list of variable names to print (same order as the audit).
+    threshold_str : str or None
+        Optional extra line(s) appended below the table with threshold
+        information.  If None, the default compare_mc_data thresholds are
+        printed.
+    """
+    _decision_rank = {"DROP": 3, "CANDIDATE": 2, "KEEP": 1, "UNKNOWN": 0}
+
+    sep = "─" * 108
+    print(f"\n{sep}")
+    print(f"{'Variable':<22}  {'max KS':>7}  {'flag':>4}  "
+          f"{'max χ²/ndf':>10}  {'max PSI':>7}  {'max W/IQR':>9}  "
+          f"{'max maxR':>8}  {'max|Δhit|':>9}  {'decision':<10}  {'N_MC':>10}")
+    print(sep)
+    for var in variables:
+        sub = summary[summary["variable"] == var]
+        if sub.empty:
+            continue
+        statuses = sub["status"].tolist() if "status" in sub.columns else []
+        if statuses and all(s == "missing_column" for s in statuses):
+            print(f"  {var:<20}  {'SKIPPED — column not present in MC or data'}")
+            continue
+        max_ks      = sub["ks_distance"].max()
+        flagged     = bool(sub["ks_flag"].any())
+        max_chi2    = sub["chi2_per_ndof"].max()
+        max_psi     = sub["psi"].max()
+        max_wn      = sub["wasserstein_norm"].max()
+        max_mr      = sub["max_local_residual"].max()
+        n_mc_tot    = sub["n_mc"].sum()
+        flag_str    = "⚑" if flagged else " "
+        decisions   = sub["drift_decision"].tolist()
+        worst_dec   = max(decisions, key=lambda d: _decision_rank.get(d, 0))
+        # max|Δhit|: worst absolute hit-fraction delta across all cells
+        if "hit_frac_delta" in sub.columns:
+            max_dhit = sub["hit_frac_delta"].abs().max()
+        else:
+            max_dhit = np.nan
+        psi_s    = f"{max_psi:.3f}"  if not pd.isna(max_psi)  else "  N/A"
+        wn_s     = f"{max_wn:.3f}"   if not pd.isna(max_wn)   else "    N/A"
+        mr_s     = f"{max_mr:.2f}"   if not pd.isna(max_mr)   else "   N/A"
+        dhit_s   = f"{max_dhit:.3f}" if not pd.isna(max_dhit) else "    N/A"
+        print(f"  {var:<20}  {max_ks:>7.4f}  {flag_str:>4}  "
+              f"{max_chi2:>10.2f}  {psi_s:>7}  {wn_s:>9}  "
+              f"{mr_s:>8}  {dhit_s:>9}  {worst_dec:<10}  {n_mc_tot:>10,}")
+    print(sep)
+    if threshold_str is None:
+        print(f"\n  KS threshold: D > {KS_FLAG_THRESHOLD} → ⚑")
+        print(f"  Drift thresholds  —  PSI: <{PSI_KEEP_MAX} KEEP / "
+              f"{PSI_KEEP_MAX}–{PSI_CANDIDATE_MAX} CANDIDATE / >{PSI_CANDIDATE_MAX} DROP")
+        print(f"                        W/IQR: <{WNORM_KEEP_MAX} / "
+              f"{WNORM_KEEP_MAX}–{WNORM_CANDIDATE_MAX} / >{WNORM_CANDIDATE_MAX}")
+        print(f"                        maxR:  <{MAXRES_KEEP_MAX} / "
+              f"{MAXRES_KEEP_MAX}–{MAXRES_CANDIDATE_MAX} / >{MAXRES_CANDIDATE_MAX}")
+        print(f"  |Δhit| > 0.05 → hit-fraction mismatch (flag also shown on per-cell plots).")
+        print(f"  Decision rule: DROP if ≥ 2 metrics flag DROP; CANDIDATE if any one does; else KEEP.")
+        print("  Next step: open each flagged variable's overlay plots and decide")
+        print("  KEEP / CANDIDATE / DROP in notes/feature_audit.md")
+    else:
+        print(threshold_str)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -917,7 +1625,7 @@ Examples
 
 Feature group aliases
 ---------------------
-  ml_features        : beta, chi2pid, FTOF 1A/1B, ECAL inner/outer, nphe_htcc/ltcc
+  ml_features        : beta, chi2pid, FTOF 1A/1B, ECAL inner/outer, nphe_htcc
   candidate_features : pcal_energy/time/path, ftof_energy/time/path_2
   kinematics         : p, theta, phi, vz, sector
   all_audit          : ml_features + candidate_features
@@ -1038,26 +1746,10 @@ def main(argv=None):
     summary.to_csv(csv_path, index=False, float_format="%.6g")
     print(f"\nSummary CSV saved to: {csv_path}")
 
-    # Print a quick per-variable max-KS table
-    print(f"\n{'─'*72}")
-    print(f"{'Variable':<22}  {'max KS dist':>11}  {'flag':>5}  "
-          f"{'max χ²/ndof':>11}  {'N_MC (all slices)':>18}")
-    print(f"{'─'*72}")
-    for var in variables:
-        sub = summary[summary["variable"] == var]
-        if sub.empty:
-            continue
-        max_ks   = sub["ks_distance"].max()
-        flagged  = bool(sub["ks_flag"].any())
-        max_chi2 = sub["chi2_per_ndof"].max()
-        n_mc_tot = sub["n_mc"].sum()
-        flag_str = "⚑" if flagged else " "
-        print(f"  {var:<20}  {max_ks:>11.4f}  {flag_str:>5}  "
-              f"{max_chi2:>11.2f}  {n_mc_tot:>18,}")
-    print(f"{'─'*72}")
-    print(f"\n  Threshold: KS D > {KS_FLAG_THRESHOLD} → ⚑ CANDIDATE or DROP")
-    print("  Next step: open each flagged variable's overlay plots and decide")
-    print("  KEEP / CANDIDATE / DROP in notes/feature_audit.md\n")
+    # Print the per-variable summary table (shared function, also used by
+    # audit_species.py so the formatting is consistent across both drivers).
+    print_summary_table(summary, variables)
+    print()
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1160,6 +1852,90 @@ if __name__ == "__main__":
 
     print("_strip_sentinels:   all assertions passed.")
 
+    # ── New drift-metric function assertions ──────────────────────────────────
+    # Use a dedicated RNG so these tests are independent of the ones above.
+    rng_drift = np.random.default_rng(seed=123)
+
+    # --- Case 1: identical distributions (same sample reused) ----------------
+    same_sample = rng_drift.normal(0, 1, 20_000)
+    w_raw_id, w_norm_id = wasserstein_normalized(same_sample, same_sample)
+    psi_id     = psi_score(same_sample, same_sample)
+    mr_id      = max_local_residual(same_sample, same_sample)
+    dec_id     = classify_drift(psi_id, w_norm_id, mr_id)
+    assert psi_id     < 0.01, f"FAIL psi identical: {psi_id:.4f} (expected < 0.01)"
+    assert w_norm_id  < 0.01, f"FAIL w_norm identical: {w_norm_id:.4f} (expected < 0.01)"
+    assert mr_id      < 0.10, f"FAIL max_local_residual identical: {mr_id:.4f} (expected < 0.10)"
+    assert dec_id == "KEEP",  f"FAIL classify_drift identical: {dec_id!r} (expected 'KEEP')"
+
+    print("wasserstein_normalized: all assertions passed.")
+    print("psi_score:              all assertions passed.")
+    print("max_local_residual:     all assertions passed.")
+    print("classify_drift:         KEEP case passed.")
+
+    # --- Case 2: clearly shifted distributions N(0,1) vs N(2,1) n=20000 -----
+    mc_shift   = rng_drift.normal(0, 1, 20_000)
+    data_shift = rng_drift.normal(2, 1, 20_000)
+    w_raw_sh, w_norm_sh = wasserstein_normalized(mc_shift, data_shift)
+    psi_sh     = psi_score(mc_shift, data_shift)
+    mr_sh      = max_local_residual(mc_shift, data_shift)
+    dec_sh     = classify_drift(psi_sh, w_norm_sh, mr_sh)
+    assert psi_sh    > 0.30, f"FAIL psi shifted: {psi_sh:.4f} (expected > 0.30)"
+    assert w_norm_sh > 0.50, f"FAIL w_norm shifted: {w_norm_sh:.4f} (expected > 0.50)"
+    assert mr_sh     > 0.50, f"FAIL max_local_residual shifted: {mr_sh:.4f} (expected > 0.50)"
+    assert dec_sh == "DROP", f"FAIL classify_drift shifted: {dec_sh!r} (expected 'DROP')"
+
+    print("classify_drift:         DROP case passed.")
+
+    # --- Case 3: empty-array guard emits one RuntimeWarning ------------------
+    with warnings.catch_warnings(record=True) as caught_w:
+        warnings.simplefilter("always")
+        wr_e, wn_e = wasserstein_normalized(np.array([]), np.array([1.0, 2.0]))
+    assert np.isnan(wn_e), f"FAIL wasserstein_normalized empty: {wn_e}"
+    assert len(caught_w) == 1 and issubclass(caught_w[0].category, RuntimeWarning), \
+        f"FAIL wasserstein_normalized empty: expected 1 RuntimeWarning, got {len(caught_w)}"
+
+    with warnings.catch_warnings(record=True) as caught_p:
+        warnings.simplefilter("always")
+        psi_e = psi_score(np.array([]), np.array([1.0, 2.0]))
+    assert np.isnan(psi_e), f"FAIL psi_score empty: {psi_e}"
+    assert len(caught_p) == 1 and issubclass(caught_p[0].category, RuntimeWarning), \
+        f"FAIL psi_score empty: expected 1 RuntimeWarning, got {len(caught_p)}"
+
+    with warnings.catch_warnings(record=True) as caught_m:
+        warnings.simplefilter("always")
+        mr_e = max_local_residual(np.array([]), np.array([1.0, 2.0]))
+    assert np.isnan(mr_e), f"FAIL max_local_residual empty: {mr_e}"
+    assert len(caught_m) == 1 and issubclass(caught_m[0].category, RuntimeWarning), \
+        f"FAIL max_local_residual empty: expected 1 RuntimeWarning, got {len(caught_m)}"
+
+    print("Empty-array guard:      all assertions passed.")
+
+    # --- Case 4: degenerate constant array (all values equal) → no exception --
+    # Two identical constant arrays: W₁ = 0 but IQR = 0, so wasserstein_norm
+    # is NaN (as documented).  PSI and max_local_residual use endpoint-nudged
+    # quantile edges, which for a constant variable collapse to 3 unique values
+    # [c-ε, c, c+ε].  All events fall in the centre bin, proportions are
+    # identical, so PSI = 0.0 and max_local_residual = 0.0.  The key
+    # requirement is that no exception is raised.
+    const_mc   = np.ones(500)
+    const_data = np.ones(500)
+    with warnings.catch_warnings(record=True):
+        warnings.simplefilter("always")
+        _, wn_deg = wasserstein_normalized(const_mc, const_data)
+        psi_deg   = psi_score(const_mc, const_data)
+        mr_deg    = max_local_residual(const_mc, const_data)
+    # wasserstein_norm: raw W=0, but IQR=0 (and combined IQR=0) → NaN
+    assert np.isnan(wn_deg), \
+        f"FAIL wasserstein_norm degenerate: expected NaN, got {wn_deg}"
+    # PSI and max_local_residual: identical distributions → 0.0, not NaN
+    # (both samples land entirely in the same nudged bin; proportions match)
+    assert psi_deg >= 0.0, \
+        f"FAIL psi_score degenerate: expected >= 0.0, got {psi_deg}"
+    assert mr_deg  >= 0.0, \
+        f"FAIL max_local_residual degenerate: expected >= 0.0, got {mr_deg}"
+
+    print("Degenerate constant:    all assertions passed.")
+
     # ── compare_distribution worked example with synthetic DataFrames ─────────
     print("\nRunning compare_distribution() worked example …")
 
@@ -1196,8 +1972,17 @@ if __name__ == "__main__":
     # Check returned stats dict has all expected keys
     expected_keys = {
         "variable", "n_mc", "n_data", "hit_frac_mc", "hit_frac_data",
+        # New per-cell hit-fraction keys
+        "n_total_mc_cell", "n_total_data_cell",
+        "n_hit_mc_cell", "n_hit_data_cell",
+        "hit_frac_mc_cell", "hit_frac_data_cell", "hit_frac_delta",
         "ks_distance", "ks_pvalue", "chi2", "ndof", "chi2_per_ndof",
         "chi2_pvalue", "mean_rel_diff", "max_abs_rel_diff", "ks_flag",
+        # Generic drift-metric keys
+        "wasserstein", "wasserstein_norm", "psi", "max_local_residual",
+        "drift_decision",
+        # Processing-outcome key
+        "status",
     }
     assert expected_keys == set(st.keys()), \
         f"FAIL: stats dict keys mismatch.\nExpected: {expected_keys}\nGot: {set(st.keys())}"
@@ -1206,9 +1991,23 @@ if __name__ == "__main__":
     assert st["n_mc"]   < n_mc,   f"FAIL: n_mc should be < {n_mc} after sentinel strip"
     assert st["n_data"] < n_data, f"FAIL: n_data should be < {n_data} after sentinel strip"
 
-    # hit_frac should be between 0 and 1
+    # Global hit_frac should be between 0 and 1
     assert 0 < st["hit_frac_mc"]   <= 1.0
     assert 0 < st["hit_frac_data"] <= 1.0
+
+    # Per-cell hit fractions (no selection mask → cell = full DataFrame)
+    # ~5% sentinels injected → expect hit fracs in [0.90, 1.0]
+    assert 0.90 < st["hit_frac_mc_cell"] < 1.0, \
+        f"FAIL: hit_frac_mc_cell = {st['hit_frac_mc_cell']:.4f} (expected 0.90–1.0)"
+    assert 0.90 < st["hit_frac_data_cell"] < 1.0, \
+        f"FAIL: hit_frac_data_cell = {st['hit_frac_data_cell']:.4f} (expected 0.90–1.0)"
+    assert abs(st["hit_frac_delta"]) < 0.05, \
+        f"FAIL: |hit_frac_delta| = {abs(st['hit_frac_delta']):.4f} (expected < 0.05)"
+    # count integrity checks
+    assert st["n_total_mc_cell"]   == n_mc,   "FAIL: n_total_mc_cell wrong"
+    assert st["n_total_data_cell"] == n_data, "FAIL: n_total_data_cell wrong"
+    assert st["n_hit_mc_cell"]   > 0, "FAIL: n_hit_mc_cell should be > 0"
+    assert st["n_hit_data_cell"] > 0, "FAIL: n_hit_data_cell should be > 0"
 
     # KS distance should be finite and in [0, 1]
     assert np.isfinite(st["ks_distance"]), "FAIL: ks_distance not finite"
@@ -1216,6 +2015,16 @@ if __name__ == "__main__":
 
     # chi2/ndof should be positive
     assert st["chi2_per_ndof"] > 0.0, f"FAIL: chi2_per_ndof = {st['chi2_per_ndof']}"
+
+    # New drift-metric assertions
+    assert st["psi"] > -1e-9, \
+        f"FAIL: PSI should be non-negative, got {st['psi']:.6g}"
+    assert st["wasserstein_norm"] >= 0.0, \
+        f"FAIL: wasserstein_norm should be >= 0, got {st['wasserstein_norm']:.6g}"
+    assert st["max_local_residual"] >= 0.0, \
+        f"FAIL: max_local_residual should be >= 0, got {st['max_local_residual']:.6g}"
+    assert st["drift_decision"] in {"KEEP", "CANDIDATE", "DROP", "UNKNOWN"}, \
+        f"FAIL: drift_decision invalid: {st['drift_decision']!r}"
 
     print(f"\n  compare_distribution stats for synthetic 'beta':")
     for k, v in st.items():

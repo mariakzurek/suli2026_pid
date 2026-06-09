@@ -39,12 +39,27 @@ For each variable and each (p, θ) slice in a 3×3 audit grid
    MC+data sample.
 3. Produces a **2-panel PNG**: histogram overlay (top) + (data−MC)/MC
    residuals with error bars (bottom).
-4. Computes three complementary statistics and returns them in a dict:
-   - **KS distance** (`ks_test`) — bin-free CDF comparison; flags D > 0.05.
-   - **χ²/ndof** (`chi2_test`) — global shape summary; accounts for
-     uncertainty in both histograms.
-   - **Bin-by-bin relative difference** (`relative_difference`) — tells you
-     *where* the distributions differ.
+4. Computes three generic, scale-free drift metrics designed to work
+   uniformly across every variable in the audit:
+   - **Wasserstein-1 / data IQR** (`wasserstein_normalized`) — earth-mover's
+     distance between MC and data normalized by the data IQR, so it is
+     comparable across variables.  KEEP < 0.05, CANDIDATE 0.05–0.20,
+     DROP ≥ 0.20.
+   - **Population Stability Index** (`psi_score`) — standard ML feature-drift
+     metric with quantile binning that auto-adapts to any variable.
+     KEEP < 0.10, CANDIDATE 0.10–0.25, DROP ≥ 0.25.
+   - **Max local quantile residual** (`max_local_residual`) — worst single-bin
+     residual on equal-count bins.  Catches localized tail mismatches that the
+     integrated metrics average away.  KEEP < 0.30, CANDIDATE 0.30–0.80,
+     DROP ≥ 0.80.
+
+A per-cell `drift_decision` (KEEP / CANDIDATE / DROP / UNKNOWN) is computed
+automatically via `classify_drift(psi, w_norm, max_resid)`: DROP if at least
+two metrics flag DROP, CANDIDATE if any one flags CANDIDATE or DROP, otherwise
+KEEP.  NaN metrics are skipped.
+
+KS distance and χ²/ndof are still computed and stored in the output CSV as
+sanity-check legacy columns, but they no longer drive the decision.
 
 Every statistical function has a thorough docstring explaining what it tests,
 when to use it, and what its pitfalls are.  Read the docstrings.
@@ -55,38 +70,44 @@ when to use it, and what its pitfalls are.  Read the docstrings.
 # Run the self-test (synthetic data, no ROOT files needed)
 python scripts/compare_mc_data.py
 
-# Audit all ML features (requires ROOT files from processing_mc_pid_training.groovy)
+# Full audit — canonical invocation matching notes/cooper_10week_plan.md
 python scripts/compare_mc_data.py \
-    --mc   /path/to/mc_training.root \
-    --data /path/to/data_training.root \
-    --vars ml_features \
-    --outdir figures/feature_audit/
+    --mc   /volatile/clas12/<username>/SULI/mc_pid_training_full.root \
+    --data /volatile/clas12/<username>/SULI/data_pid_training.root \
+    --vars all_audit kinematics \
+    --outdir figures/feature_audit
 
-# Audit candidate features (PCAL + FTOF layer 2)
+# Single-variable iteration
 python scripts/compare_mc_data.py \
-    --mc   mc.root --data data.root \
-    --vars candidate_features \
+    --mc mc.root --data data.root --vars beta \
     --outdir figures/feature_audit/
-
-# Quick test with only 100k rows
-python scripts/compare_mc_data.py \
-    --mc mc.root --data data.root --vars beta chi2pid \
-    --max-rows 100000 --outdir /tmp/audit_test/
 ```
 
 ### Variable group aliases
 
 | Alias | Variables |
 |-------|-----------|
-| `ml_features` | beta, chi2pid, ftof\_energy\_1A/1B, ftof\_time\_1A/1B, ftof\_path\_1A/1B, ecin/ecout\_energy, ecin/ecout\_time, ecin/ecout\_path, nphe\_htcc, nphe\_ltcc |
+| `ml_features` | beta, chi2pid, ftof\_energy\_1A/1B, ftof\_time\_1A/1B, ftof\_path\_1A/1B, ecin/ecout\_energy, ecin/ecout\_time, ecin/ecout\_path, nphe\_htcc |
 | `candidate_features` | pcal\_energy/time/path, ftof\_energy/time/path\_2 |
 | `kinematics` | p, theta, phi, vz, sector |
 | `all_audit` | ml\_features + candidate\_features |
 
 ### Output
 
-- **`figures/feature_audit/<variable>/<variable>_p<lo>-<hi>_theta<lo>-<hi>.png`** — one overlay plot per (variable, slice).
-- **`figures/feature_audit/feature_audit_summary.csv`** — one row per (variable, p-bin, θ-bin) with KS distance, χ²/ndof, hit fractions, and the `ks_flag` column.
+- **`figures/feature_audit/<variable>/<variable>_p<lo>-<hi>_theta<lo>-<hi>.png`** — one overlay PNG per (variable, slice).
+- **`figures/feature_audit/feature_audit_summary.csv`** — one row per (variable, p-bin, θ-bin) with all metrics.  Key columns:
+  - `wasserstein`, `wasserstein_norm` — raw and IQR-normalised Wasserstein-1 drift metrics.
+  - `psi` — Population Stability Index.
+  - `max_local_residual` — worst single-bin quantile residual.
+  - `drift_decision` — KEEP / CANDIDATE / DROP / UNKNOWN.
+  - `hit_frac_mc`, `hit_frac_data` — fraction of rows with a valid (non-sentinel) value for this variable, computed on the **parent** (full species-selected) DataFrame; reflects global detector acceptance.
+  - `n_total_mc_cell`, `n_total_data_cell` — total MC and data rows in the (p, θ) cell before sentinel stripping.
+  - `n_hit_mc_cell`, `n_hit_data_cell` — rows in the cell with a valid (non-sentinel) value.
+  - `hit_frac_mc_cell`, `hit_frac_data_cell` — per-cell hit fractions (n_hit / n_total for this kinematic cell); NaN if the cell is empty.
+  - `hit_frac_delta` — `hit_frac_data_cell − hit_frac_mc_cell`; |Δ| > 0.05 flags a hit-fraction mismatch that should be reviewed before trusting the shape comparison for this cell.
+  - Legacy columns: `ks_distance`, `chi2_per_ndof`, `mean_rel_diff`, `max_abs_rel_diff`, `ks_flag`.
+  - `status` — `ok` / `missing_column` / `empty`.
+  - After running, the audit operator appends a `decision_notes` free-text column with any visual-cross-check observations or override rationale.
 
 ### Using as a library
 
@@ -96,21 +117,91 @@ from scripts.compare_mc_data import compare_distribution, run_feature_audit
 stats = compare_distribution(
     df_mc, df_data, variable="beta",
     bins=60, normalize=True,
-    selection_mc=(df_mc["p"] > 1.0) & (df_mc["p"] < 2.0),
+    selection_mc="pid == 321", selection_data="pid == 321",
     save_path="figures/feature_audit/beta/beta_p1-2_theta5-15.png",
 )
-print(stats["ks_distance"], stats["chi2_per_ndof"])
+print(stats["drift_decision"], stats["psi"], stats["wasserstein_norm"], stats["max_local_residual"])
 ```
 
 ### Decision criteria (Week 3 audit)
 
-| Criterion | Decision |
-|-----------|----------|
-| KS D < 0.05 in all 9 slices, residuals flat | **KEEP** |
-| KS D > 0.05 in ≤ 3 slices, shape difference mild | **CANDIDATE** — investigate further |
-| KS D > 0.05 in most slices, or residuals show coherent large bias | **DROP** — exclude from training |
+| Per-cell condition | Per-cell decision |
+|---|---|
+| All three drift metrics in their KEEP band | **KEEP** |
+| At least one metric in CANDIDATE band; none or one in DROP band | **CANDIDATE** |
+| At least two metrics in DROP band | **DROP** |
+| All metrics NaN (no usable entries) | **UNKNOWN** |
 
-Record decisions in `notes/feature_audit.md`.
+Per-variable aggregation: variable is **DROP** if any cell is DROP; **CANDIDATE**
+if any cell is CANDIDATE and none are DROP; **KEEP** only if all cells are KEEP.
+Variables flagged CANDIDATE or DROP require visual cross-check of the per-cell
+PNGs before locking the decision.
+
+Record decisions in `figures/feature_audit/feature_audit_summary.csv`
+(`decision_notes` column) and write up the per-variable narrative in Section 5
+of the Week 1-2 report.  See `notes/cooper_10week_plan.md` Task 3a and Task 3c
+for the full audit workflow.
+
+### Missing columns
+
+If a requested variable is not present in the MC or data ntuple, the script
+emits a warning, marks the row `status = "missing_column"` in the summary CSV,
+and continues to the next variable rather than crashing.  Check the CSV's
+`status` column after every run to confirm all requested variables were actually
+audited.
+
+---
+
+## `audit_species.py`
+
+Opinionated thin driver that wraps `compare_mc_data.run_feature_audit` with
+the SULI-2026-project-specific MC and data selections for a chosen EB particle
+species.  The generic engine stays generic; this script encodes the
+project-specific workflow: species pid cut, MC truth-match mode, and the
+provenance README that makes each audit output directory self-documenting.
+
+### Species aliases
+
+| Alias | PID    | Human label |
+|-------|--------|-------------|
+| `kp`  | 321    | K+          |
+| `pip` | 211    | π+          |
+| `p`   | 2212   | p           |
+| `em`  | 11     | e−          |
+| `pim` | −211   | π−          |
+| `kn`  | −321   | K−          |
+
+### `--truth-mode` semantics
+
+| Mode      | MC selection | When to use |
+|-----------|--------------|-------------|
+| `matched` (default) | `(pid == SPEC) & (mc_matching_pid != -9999)` | ML feature drift audits — the classifier sees the EB-labeled sample including mis-IDs, so auditing that population is the correct diagnostic. |
+| `pure`    | `(pid == SPEC) & (mc_matching_pid == SPEC)` | Detector-response physics studies where you need truth-pure tracks.  Not appropriate for ML feature audits. |
+| `off`     | `pid == SPEC` | When truth matching is suspect, or for apples-to-apples with data without imposing extra MC quality cuts. |
+
+Data selection is always `pid == SPEC` regardless of truth mode (data has no `mc_matching_pid`).
+
+### Canonical invocation
+
+```bash
+python scripts/audit_species.py \
+    --mc   /volatile/clas12/<username>/SULI/mc_pid_training_full.root \
+    --data /volatile/clas12/<username>/SULI/data_pid_training.root \
+    --species kp \
+    --vars all_audit kinematics \
+    --outdir figures/feature_audit/kp
+```
+
+### What it produces
+
+- All per-cell PNGs and `feature_audit_summary.csv` via the underlying `run_feature_audit` engine.
+- A `README.md` in the output directory recording the species, selections, input files, variable list, and run timestamp — a provenance record so the audit is self-documenting weeks later.
+- A hit-fraction alert section listing any `(variable, cell)` pairs where `|hit_frac_delta| > 0.05`.
+
+### Further reference
+
+- See `compare_mc_data.py` section above for all metric definitions and CSV column meanings.
+- See `notes/cooper_10week_plan.md` Task 3a for the full audit workflow.
 
 ---
 
