@@ -297,7 +297,7 @@ if __name__ == "__main__":
         "p"               : rng.uniform(1.0, 5.0, N),
         "theta"           : rng.uniform(5.0, 35.0, N),
         "beta"            : rng.uniform(0.0, 1.0, N),
-        "chi2pid"         : rng.normal(0, 1, N),
+        "chi2pid"         : rng.normal(-10, 10, N),
     })
 
     pids_data = rng.choice([321, 211, 2212], size=N, p=[0.50, 0.30, 0.20])
@@ -306,7 +306,7 @@ if __name__ == "__main__":
         "p"      : rng.uniform(1.0, 5.0, N),
         "theta"  : rng.uniform(5.0, 35.0, N),
         "beta"   : rng.uniform(0.0, 1.0, N),
-        "chi2pid": rng.normal(0, 1, N),
+        "chi2pid": rng.normal(-10, 10, N),
     })
 
     pid_kp = SPECIES_MAP["kp"]["pid"]  # 321
