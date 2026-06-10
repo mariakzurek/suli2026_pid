@@ -25,25 +25,30 @@ Typical usage on a pandas DataFrame
     )
     print(stats)
 
-Column map (processing_mc_pid_training.groovy, 53 columns)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Column map (processing_mc_pid_training.groovy, 57 columns; data script has 54)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   Event-level (1-8):   runnum, evnum, helicity, Q2, W, x, y, nu
   Per-track (9-15):    pid, p, theta, phi, vz, sector, status
-  ML features (16-30): beta, chi2pid,
+  ML features (16-31): beta, chi2pid,
                         ftof_energy_1A, ftof_energy_1B,
                         ftof_time_1A,   ftof_time_1B,
                         ftof_path_1A,   ftof_path_1B,
                         ecin_energy,    ecout_energy,
                         ecin_time,      ecout_time,
                         ecin_path,      ecout_path,
-                        nphe_htcc
-  PCAL + FTOF 2 (31-36): pcal_energy, pcal_time, pcal_path,
+                        nphe_htcc,      nphe_ltcc
+  PCAL + FTOF 2 (32-37): pcal_energy, pcal_time, pcal_path,
                           ftof_energy_2, ftof_time_2, ftof_path_2
-  RICH (37-50):  rich_emilay ... rich_best_ntot  (cross-check only)
-  MC truth (51-53): mc_matching_pid, mc_parent_pid, mc_match_quality
-# Note: `nphe_ltcc` is documented in the original groovy spec but is not
-# currently emitted by `processing_mc_pid_training.groovy`.  Removed from
-# `ML_FEATURES` after a Week 3 audit run found the column absent.
+  RICH (38-51):  rich_emilay ... rich_best_ntot  (cross-check only)
+  MC truth (52-54, MC only): mc_matching_pid, mc_parent_pid, mc_match_quality
+  Missing-mass hypotheses — NOT ML features, appended at end:
+    MC cols 55-57 / Data cols 52-54:
+      Mx_epiX  (missing mass with pi+ hypothesis, sentinel -9999 if Mx^2 < 0)
+      Mx_eKX   (missing mass with K+  hypothesis, sentinel -9999 if Mx^2 < 0)
+      Mx_epX   (missing mass with p   hypothesis, sentinel -9999 if Mx^2 < 0)
+# Note: `nphe_ltcc` IS emitted by both groovy scripts (col 31).  Column count
+# was previously mis-stated as 53; actual count before this change was 54 (MC)
+# and 51 (data).  After adding Mx_epiX/Mx_eKX/Mx_epX: 57 (MC), 54 (data).
 
 Missing-value convention
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -95,7 +100,7 @@ MAXRES_CANDIDATE_MAX = 0.80   # 0.30–0.80 → CANDIDATE; ≥ 0.80 → DROP
 COLOR_MC   = "steelblue"
 COLOR_DATA = "darkorange"
 
-# Feature groups, in the order used by the groovy ntuple (columns 16-30).
+# Feature groups, in the order used by the groovy ntuple (columns 16-31).
 # These are the variables Cooper audits in Task 3a.
 ML_FEATURES = [
     "beta", "chi2pid",
@@ -105,7 +110,7 @@ ML_FEATURES = [
     "ecin_energy",    "ecout_energy",
     "ecin_time",      "ecout_time",
     "ecin_path",      "ecout_path",
-    "nphe_htcc",
+    "nphe_htcc",      "nphe_ltcc",
 ]
 
 CANDIDATE_FEATURES = [
