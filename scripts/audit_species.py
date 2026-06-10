@@ -27,12 +27,28 @@ Default selections:
   after the species/truth-match filter; this window matches the standard SULI
   target-window definition.  Disable with --no-vz-cut.
 
-Canonical invocation:
-    python scripts/audit_species.py \\
-        --mc   /volatile/clas12/<user>/SULI/mc_pid_training_full.root \\
-        --data /volatile/clas12/<user>/SULI/data_pid_training.root \\
-        --species kp --vars all_audit kinematics \\
-        --outdir figures/feature_audit/kp
+  No event-level kinematic cuts (Q², W, y, Mx) are applied by default.
+  The audit default is uncut because the trained classifier will see the
+  uncut per-track sample at training time; KEEP/CANDIDATE/DROP decisions
+  must reflect that.  Use --sidis-cuts or individual --q2-cut / --w-cut /
+  --y-cut / --mx-cut flags for diagnostic comparison runs.
+
+Canonical invocations:
+
+  # Primary audit (no event-level cuts; matches what the classifier sees):
+  python scripts/audit_species.py \\
+      --mc   /volatile/clas12/<user>/SULI/mc_pid_training_full.root \\
+      --data /volatile/clas12/<user>/SULI/data_pid_training.root \\
+      --species kp --vars all_audit kinematics \\
+      --outdir figures/feature_audit/kp
+
+  # Diagnostic SIDIS-cut audit (Q² > 2, W > 2, y < 0.75, Mx_eKX > 1.6):
+  python scripts/audit_species.py \\
+      --mc   /volatile/clas12/<user>/SULI/mc_pid_training_full.root \\
+      --data /volatile/clas12/<user>/SULI/data_pid_training.root \\
+      --species kp --vars all_audit kinematics \\
+      --sidis-cuts
+  # (Output auto-suffixed to figures/feature_audit/kp_sidis/)
 """
 
 import argparse
@@ -64,6 +80,15 @@ SPECIES_MAP = {
     "kn"  : {"pid": -321,  "label": "K-"},
 }
 HIT_FRAC_THRESHOLD = 0.05   # flag |Δhit| > this
+
+# Species aliases for which a SIDIS Mx cut is meaningful (positive hadrons only).
+_MX_SPECIES = {"kp": "Mx_eKX", "pip": "Mx_epiX", "p": "Mx_epX"}
+
+# SIDIS defaults for --sidis-cuts convenience flag.
+_SIDIS_Q2  = (2.0, float("inf"))
+_SIDIS_W   = (2.0, float("inf"))
+_SIDIS_Y   = (0.0, 0.75)
+_SIDIS_MX_DEFAULTS = {"kp": 1.6, "pip": 1.5, "p": 1.0}
 
 
 def _filter_mc(df, pid, truth_mode):
@@ -119,15 +144,184 @@ def _apply_vz_cut(df_mc, df_data, vz_min, vz_max):
     return df_mc[mc_mask].reset_index(drop=True), df_data[data_mask].reset_index(drop=True)
 
 
+def _apply_q2_cut(df_mc, df_data, q2_min, q2_max):
+    """Apply Q² cut to both DataFrames.
+
+    Parameters
+    ----------
+    df_mc, df_data : pd.DataFrame
+        Species- (and truth-match-) filtered DataFrames (vz cut already applied).
+    q2_min, q2_max : float
+        Exclusive bounds (GeV²): keep rows where q2_min < Q2 < q2_max.
+        Use float('inf') as q2_max for a one-sided lower cut.
+
+    Returns
+    -------
+    (df_mc_cut, df_data_cut) : tuple of pd.DataFrame
+
+    Raises
+    ------
+    SystemExit
+        If the ``Q2`` column is absent from either DataFrame.
+    """
+    missing = []
+    if "Q2" not in df_mc.columns:
+        missing.append("MC")
+    if "Q2" not in df_data.columns:
+        missing.append("Data")
+    if missing:
+        sys.exit(
+            f"\nERROR: 'Q2' column missing from: {', '.join(missing)} DataFrame(s).\n"
+            f"  Use --no-q2-cut to skip the Q² cut and proceed without it."
+        )
+    mc_mask   = (df_mc["Q2"]   > q2_min) & (df_mc["Q2"]   < q2_max)
+    data_mask = (df_data["Q2"] > q2_min) & (df_data["Q2"] < q2_max)
+    return df_mc[mc_mask].reset_index(drop=True), df_data[data_mask].reset_index(drop=True)
+
+
+def _apply_w_cut(df_mc, df_data, w_min, w_max):
+    """Apply W cut to both DataFrames.
+
+    Parameters
+    ----------
+    df_mc, df_data : pd.DataFrame
+        Species- (and truth-match-) filtered DataFrames.
+    w_min, w_max : float
+        Exclusive bounds (GeV): keep rows where w_min < W < w_max.
+        Use float('inf') as w_max for a one-sided lower cut.
+
+    Returns
+    -------
+    (df_mc_cut, df_data_cut) : tuple of pd.DataFrame
+
+    Raises
+    ------
+    SystemExit
+        If the ``W`` column is absent from either DataFrame.
+    """
+    missing = []
+    if "W" not in df_mc.columns:
+        missing.append("MC")
+    if "W" not in df_data.columns:
+        missing.append("Data")
+    if missing:
+        sys.exit(
+            f"\nERROR: 'W' column missing from: {', '.join(missing)} DataFrame(s).\n"
+            f"  Use --no-w-cut to skip the W cut and proceed without it."
+        )
+    mc_mask   = (df_mc["W"]   > w_min) & (df_mc["W"]   < w_max)
+    data_mask = (df_data["W"] > w_min) & (df_data["W"] < w_max)
+    return df_mc[mc_mask].reset_index(drop=True), df_data[data_mask].reset_index(drop=True)
+
+
+def _apply_y_cut(df_mc, df_data, y_min, y_max):
+    """Apply inelasticity y cut to both DataFrames.
+
+    Parameters
+    ----------
+    df_mc, df_data : pd.DataFrame
+        Species- (and truth-match-) filtered DataFrames.
+    y_min, y_max : float
+        Exclusive bounds (dimensionless): keep rows where y_min < y < y_max.
+
+    Returns
+    -------
+    (df_mc_cut, df_data_cut) : tuple of pd.DataFrame
+
+    Raises
+    ------
+    SystemExit
+        If the ``y`` column is absent from either DataFrame.
+    """
+    missing = []
+    if "y" not in df_mc.columns:
+        missing.append("MC")
+    if "y" not in df_data.columns:
+        missing.append("Data")
+    if missing:
+        sys.exit(
+            f"\nERROR: 'y' column missing from: {', '.join(missing)} DataFrame(s).\n"
+            f"  Use --no-y-cut to skip the y cut and proceed without it."
+        )
+    mc_mask   = (df_mc["y"]   > y_min) & (df_mc["y"]   < y_max)
+    data_mask = (df_data["y"] > y_min) & (df_data["y"] < y_max)
+    return df_mc[mc_mask].reset_index(drop=True), df_data[data_mask].reset_index(drop=True)
+
+
+def _apply_mx_cut(df_mc, df_data, mx_min, mx_max, species_alias):
+    """Apply species-appropriate missing-mass cut to both DataFrames.
+
+    The column used depends on the species (hadron-mass hypothesis):
+
+      kp  → Mx_eKX   (K+ hypothesis)
+      pip → Mx_epiX  (π+ hypothesis)
+      p   → Mx_epX   (proton hypothesis)
+
+    For species aliases em, pim, kn the missing-mass cut is not defined
+    (no SIDIS-relevant exclusive channel); call sites must guard against
+    these aliases and use ``--no-mx-cut`` or skip ``--sidis-cuts`` Mx
+    application rather than calling this function.
+
+    Parameters
+    ----------
+    df_mc, df_data : pd.DataFrame
+        Species- (and truth-match-) filtered DataFrames.
+    mx_min, mx_max : float
+        Exclusive bounds (GeV): keep rows where mx_min < Mx_col < mx_max.
+        Use float('inf') as mx_max for a one-sided lower cut.
+    species_alias : str
+        One of the keys in SPECIES_MAP.
+
+    Returns
+    -------
+    (df_mc_cut, df_data_cut) : tuple of pd.DataFrame
+
+    Raises
+    ------
+    ValueError
+        If species_alias is not one of {kp, pip, p}.
+    SystemExit
+        If the appropriate Mx column is absent from either DataFrame.
+        This happens with old ROOT files produced before the Mx columns
+        were added to the groovy in 2026-06.
+    """
+    if species_alias not in _MX_SPECIES:
+        raise ValueError(
+            f"Mx cut undefined for species: {species_alias!r}.  "
+            f"The missing-mass cut is only defined for kp (Mx_eKX), "
+            f"pip (Mx_epiX), and p (Mx_epX).  For species em/pim/kn, "
+            f"pass --no-mx-cut or omit --mx-cut / --sidis-cuts."
+        )
+    col = _MX_SPECIES[species_alias]
+    missing = []
+    if col not in df_mc.columns:
+        missing.append("MC")
+    if col not in df_data.columns:
+        missing.append("Data")
+    if missing:
+        sys.exit(
+            f"\nERROR: '{col}' column missing from: {', '.join(missing)} DataFrame(s).\n"
+            f"  The Mx columns were added to the groovy in 2026-06; re-process your\n"
+            f"  ROOT files with the current groovy, or pass --no-mx-cut to skip this filter."
+        )
+    mc_mask   = (df_mc[col]   > mx_min) & (df_mc[col]   < mx_max)
+    data_mask = (df_data[col] > mx_min) & (df_data[col] < mx_max)
+    return df_mc[mc_mask].reset_index(drop=True), df_data[data_mask].reset_index(drop=True)
+
+
 def _write_audit_readme(outdir, pid, label, truth_mode, mc_path, data_path, variables,
-                        vz_cut_line="Vertex-z cut: disabled"):
-    """Write a provenance README (≤20 lines) into outdir."""
+                        vz_cut_line="Vertex-z cut: disabled",
+                        extra_cut_lines=None):
+    """Write a provenance README (≤30 lines) into outdir."""
     now    = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     mc_sel = {
         "matched": f"(pid == {pid}) & (mc_matching_pid != {SENTINEL_LOW})",
         "pure":    f"(pid == {pid}) & (mc_matching_pid == {pid})",
         "off":     f"pid == {pid}",
     }[truth_mode]
+    extra_block = ""
+    if extra_cut_lines:
+        extra_block = "".join(f"  {line}\n" for line in extra_cut_lines)
     content = (
         f"# Feature audit — species {label} (pid={pid})\n\n"
         f"Generated: {now}\n\n"
@@ -135,8 +329,9 @@ def _write_audit_readme(outdir, pid, label, truth_mode, mc_path, data_path, vari
         f"  MC   : {mc_sel}\n"
         f"  Data : pid == {pid}\n"
         f"  Truth mode: {truth_mode}\n"
-        f"  {vz_cut_line}\n\n"
-        f"## Input files\n"
+        f"  {vz_cut_line}\n"
+        f"{extra_block}"
+        f"\n## Input files\n"
         f"  MC   : {mc_path}\n"
         f"  Data : {data_path}\n\n"
         f"## Variables audited\n"
@@ -206,11 +401,49 @@ def _build_parser():
                    help="MC label in plots. Default: 'MC <label>'")
     p.add_argument("--label-data", default=None,
                    help="Data label in plots. Default: 'Data <label>'")
+    # ── Vertex-z cut ────────────────────────────────────────────────────────
     p.add_argument("--vz-cut", nargs=2, type=float, metavar=("MIN", "MAX"),
                    default=[-8.0, 2.0],
                    help="Vertex-z cut window in cm (exclusive bounds). Default: -8 2")
     p.add_argument("--no-vz-cut", action="store_true",
                    help="Disable the vertex-z cut entirely.")
+    # ── Event-level kinematic cuts ───────────────────────────────────────────
+    p.add_argument("--q2-cut", nargs=2, type=float, metavar=("MIN", "MAX"),
+                   default=None,
+                   help="Q² cut (GeV²), exclusive bounds. Only applied if flag is passed "
+                        "or --sidis-cuts is set.")
+    p.add_argument("--no-q2-cut", action="store_true",
+                   help="Suppress Q² cut even if --sidis-cuts is set.")
+    p.add_argument("--w-cut", nargs=2, type=float, metavar=("MIN", "MAX"),
+                   default=None,
+                   help="W cut (GeV), exclusive bounds. Only applied if flag is passed "
+                        "or --sidis-cuts is set.")
+    p.add_argument("--no-w-cut", action="store_true",
+                   help="Suppress W cut even if --sidis-cuts is set.")
+    p.add_argument("--y-cut", nargs=2, type=float, metavar=("MIN", "MAX"),
+                   default=None,
+                   help="Inelasticity y cut (dimensionless), exclusive bounds. Only applied "
+                        "if flag is passed or --sidis-cuts is set.")
+    p.add_argument("--no-y-cut", action="store_true",
+                   help="Suppress y cut even if --sidis-cuts is set.")
+    p.add_argument("--mx-cut", nargs=2, type=float, metavar=("MIN", "MAX"),
+                   default=None,
+                   help="Species-appropriate missing-mass cut (GeV). Column selected "
+                        "by species: kp→Mx_eKX, pip→Mx_epiX, p→Mx_epX. Only applied "
+                        "if flag is passed or --sidis-cuts is set.")
+    p.add_argument("--no-mx-cut", action="store_true",
+                   help="Suppress Mx cut even if --sidis-cuts is set.")
+    # ── SIDIS convenience bundle ─────────────────────────────────────────────
+    p.add_argument("--sidis-cuts", action="store_true",
+                   help=(
+                       "Enable all SIDIS event-level cuts with canonical defaults: "
+                       "Q² > 2 GeV², W > 2 GeV, y < 0.75, and species-appropriate "
+                       "Mx lower bound (kp→1.6, pip→1.5, p→1.0 GeV). "
+                       "Individual --no-X flags suppress specific cuts. "
+                       "Species em/pim/kn have no Mx cut even with --sidis-cuts. "
+                       "Output directory is auto-suffixed with '_sidis' unless "
+                       "--outdir is explicitly provided."
+                   ))
     return p
 
 
@@ -221,7 +454,18 @@ def main(argv=None):
     spec    = SPECIES_MAP[args.species]
     pid     = spec["pid"]
     label   = spec["label"]
-    outdir  = args.outdir or os.path.join("figures", "feature_audit", args.species)
+
+    # ── Resolve output directory ───────────────────────────────────────────────
+    user_set_outdir = args.outdir is not None
+    if user_set_outdir:
+        outdir = args.outdir
+    else:
+        base = os.path.join("figures", "feature_audit", args.species)
+        if args.sidis_cuts:
+            outdir = base + "_sidis"
+        else:
+            outdir = base
+
     lmc     = args.label_mc   or f"MC {label}"
     ldata   = args.label_data or f"Data {label}"
 
@@ -249,7 +493,93 @@ def main(argv=None):
         vz_cut_line = "Vertex-z cut: disabled"
         vz_preamble = "  Vertex-z cut: disabled"
 
+    # ── Resolve event-level kinematic cut settings ─────────────────────────────
+    # Priority: --no-X always wins. Otherwise --X takes effect if supplied.
+    # Otherwise --sidis-cuts enables a default. Otherwise the cut is off.
+
+    sidis_defaults = {
+        "q2": _SIDIS_Q2,
+        "w":  _SIDIS_W,
+        "y":  _SIDIS_Y,
+    }
+
+    def _resolve_cut(name, user_val, no_flag, default_pair):
+        """Return (enabled, min, max) for a named cut.
+
+        Parameters
+        ----------
+        name : str        — human name for warnings
+        user_val : list or None  — parsed value of --X-cut (None if not passed)
+        no_flag : bool    — True if --no-X-cut was passed
+        default_pair : tuple or None — (min, max) to use when --sidis-cuts active
+
+        Returns (enabled, lo, hi) where enabled is bool and lo/hi are floats.
+        """
+        if no_flag:
+            if user_val is not None:
+                print(f"WARNING: both --{name}-cut and --no-{name}-cut were supplied; "
+                      f"--no-{name}-cut wins and the {name} cut is disabled.")
+            return False, None, None
+        if user_val is not None:
+            return True, float(user_val[0]), float(user_val[1])
+        if args.sidis_cuts and default_pair is not None:
+            return True, float(default_pair[0]), float(default_pair[1])
+        return False, None, None
+
+    q2_on, q2_lo, q2_hi = _resolve_cut(
+        "q2", args.q2_cut, args.no_q2_cut, sidis_defaults["q2"])
+    w_on,  w_lo,  w_hi  = _resolve_cut(
+        "w",  args.w_cut,  args.no_w_cut,  sidis_defaults["w"])
+    y_on,  y_lo,  y_hi  = _resolve_cut(
+        "y",  args.y_cut,  args.no_y_cut,  sidis_defaults["y"])
+
+    # Mx cut: species-aware; em/pim/kn have no SIDIS Mx default.
+    mx_on  = False
+    mx_lo  = None
+    mx_hi  = None
+    if args.no_mx_cut:
+        if args.mx_cut is not None:
+            print("WARNING: both --mx-cut and --no-mx-cut were supplied; "
+                  "--no-mx-cut wins and the Mx cut is disabled.")
+        mx_on = False
+    elif args.mx_cut is not None:
+        if args.species not in _MX_SPECIES:
+            sys.exit(
+                f"\nERROR: --mx-cut is not defined for species '{args.species}'.  "
+                f"The missing-mass cut is only defined for kp, pip, and p."
+            )
+        mx_on = True
+        mx_lo = float(args.mx_cut[0])
+        mx_hi = float(args.mx_cut[1])
+    elif args.sidis_cuts and args.species in _SIDIS_MX_DEFAULTS:
+        mx_on = True
+        mx_lo = float(_SIDIS_MX_DEFAULTS[args.species])
+        mx_hi = float("inf")
+    # else: mx_on stays False (em/pim/kn with --sidis-cuts, or no flag at all)
+
     # ── Preamble ───────────────────────────────────────────────────────────────
+    sidis_header = "  SIDIS cuts: enabled (--sidis-cuts)\n" if args.sidis_cuts else ""
+
+    def _fmt_cut(name, on, lo, hi, no_flag, unit=""):
+        if no_flag:
+            return f"  {name} cut: disabled (--no-{name.lower().replace(' ', '-')}-cut)"
+        if on:
+            hi_str = "inf" if hi == float("inf") else str(hi)
+            return f"  {name} cut: {lo} < {name} < {hi_str}{unit}"
+        return f"  {name} cut: not applied"
+
+    q2_preamble  = _fmt_cut("Q2", q2_on, q2_lo, q2_hi, args.no_q2_cut, " GeV²")
+    w_preamble   = _fmt_cut("W",  w_on,  w_lo,  w_hi,  args.no_w_cut,  " GeV")
+    y_preamble   = _fmt_cut("y",  y_on,  y_lo,  y_hi,  args.no_y_cut)
+    if args.no_mx_cut:
+        mx_preamble = "  Mx cut: disabled (--no-mx-cut)"
+    elif mx_on:
+        mx_col   = _MX_SPECIES.get(args.species, "N/A")
+        hi_str   = "inf" if mx_hi == float("inf") else str(mx_hi)
+        mx_preamble = f"  Mx cut: {mx_lo} < {mx_col} < {hi_str} GeV"
+    else:
+        mx_preamble = "  Mx cut: not applied"
+
     print(f"\n{'='*65}")
     print(f"audit_species.py  —  {label} (pid={pid})")
     print(f"{'='*65}")
@@ -258,6 +588,12 @@ def main(argv=None):
     print(f"  MC selection: {mc_sel_str}")
     print(f"  Data select : {data_sel_str}")
     print(vz_preamble)
+    if args.sidis_cuts:
+        print(f"  SIDIS cuts  : enabled (--sidis-cuts)")
+    print(q2_preamble)
+    print(w_preamble)
+    print(y_preamble)
+    print(mx_preamble)
     print(f"  Variables   : {variables}")
     print(f"  Output dir  : {outdir}")
     print(f"  Bins        : {args.bins}   Normalize: {not args.no_normalize}")
@@ -293,6 +629,31 @@ def main(argv=None):
         print(f"\n  MC after species + truth-match selection : {len(df_mc):,}")
         print(f"  Data after species selection             : {len(df_data):,}")
 
+    # ── Apply event-level kinematic cuts (in order: Q², W, y, Mx) ─────────────
+    if q2_on:
+        df_mc, df_data = _apply_q2_cut(df_mc, df_data, q2_lo, q2_hi)
+        hi_str = "inf" if q2_hi == float("inf") else str(q2_hi)
+        print(f"  MC after Q² cut ({q2_lo} < Q2 < {hi_str})   : {len(df_mc):,}")
+        print(f"  Data after Q² cut                       : {len(df_data):,}")
+
+    if w_on:
+        df_mc, df_data = _apply_w_cut(df_mc, df_data, w_lo, w_hi)
+        hi_str = "inf" if w_hi == float("inf") else str(w_hi)
+        print(f"  MC after W cut ({w_lo} < W < {hi_str})     : {len(df_mc):,}")
+        print(f"  Data after W cut                        : {len(df_data):,}")
+
+    if y_on:
+        df_mc, df_data = _apply_y_cut(df_mc, df_data, y_lo, y_hi)
+        print(f"  MC after y cut ({y_lo} < y < {y_hi})      : {len(df_mc):,}")
+        print(f"  Data after y cut                        : {len(df_data):,}")
+
+    if mx_on:
+        df_mc, df_data = _apply_mx_cut(df_mc, df_data, mx_lo, mx_hi, args.species)
+        mx_col  = _MX_SPECIES[args.species]
+        hi_str  = "inf" if mx_hi == float("inf") else str(mx_hi)
+        print(f"  MC after Mx cut ({mx_lo} < {mx_col} < {hi_str}): {len(df_mc):,}")
+        print(f"  Data after Mx cut                       : {len(df_data):,}")
+
     # ── Run audit ─────────────────────────────────────────────────────────────
     os.makedirs(outdir, exist_ok=True)
     print(f"\nRunning feature audit …\n")
@@ -312,9 +673,18 @@ def main(argv=None):
     print(f"\nSummary CSV saved to: {csv_path}")
 
     # ── Write provenance README ────────────────────────────────────────────────
+    extra_cut_lines = []
+    if args.sidis_cuts:
+        extra_cut_lines.append("SIDIS cuts: enabled (--sidis-cuts)")
+    extra_cut_lines.append(q2_preamble.strip())
+    extra_cut_lines.append(w_preamble.strip())
+    extra_cut_lines.append(y_preamble.strip())
+    extra_cut_lines.append(mx_preamble.strip())
+
     _write_audit_readme(outdir, pid, label, args.truth_mode,
                         args.mc, args.data, variables,
-                        vz_cut_line=vz_cut_line)
+                        vz_cut_line=vz_cut_line,
+                        extra_cut_lines=extra_cut_lines)
 
     # ── Copy COLUMNS.md into the species output directory ──────────────────────
     columns_src = os.path.join("figures", "feature_audit", "COLUMNS.md")
@@ -324,6 +694,26 @@ def main(argv=None):
 
     # ── Per-variable summary table ─────────────────────────────────────────────
     print_summary_table(summary, variables)
+
+    # ── Cuts-applied summary line ──────────────────────────────────────────────
+    def _fmt_range(on, lo, hi):
+        if not on:
+            return "off"
+        hi_str = "inf" if hi == float("inf") else str(hi)
+        return f"[{lo}, {hi_str}]"
+
+    if vz_cut_enabled:
+        vz_range = f"[{vz_min}, {vz_max}]"
+    else:
+        vz_range = "off"
+
+    mx_col_name = _MX_SPECIES.get(args.species, "Mx")
+    print(f"\nCuts applied: "
+          f"Q2 {_fmt_range(q2_on, q2_lo, q2_hi)}, "
+          f"W {_fmt_range(w_on, w_lo, w_hi)}, "
+          f"y {_fmt_range(y_on, y_lo, y_hi)}, "
+          f"{mx_col_name} {_fmt_range(mx_on, mx_lo, mx_hi)}, "
+          f"vz {vz_range}")
 
     # ── Hit-fraction alert section ─────────────────────────────────────────────
     print(f"\nHit-fraction mismatches (|Δ| > {HIT_FRAC_THRESHOLD}):")
@@ -376,6 +766,12 @@ if __name__ == "__main__":
         "beta"            : rng.uniform(0.0, 1.0, N),
         "chi2pid"         : rng.normal(-10, 10, N),
         "vz"              : rng.uniform(-15.0, 10.0, N),
+        "Q2"              : rng.uniform(0.5, 8.0, N),
+        "W"               : rng.uniform(1.5, 4.5, N),
+        "y"               : rng.uniform(0.05, 0.95, N),
+        "Mx_eKX"          : rng.uniform(0.8, 3.5, N),
+        "Mx_epiX"         : rng.uniform(0.8, 3.5, N),
+        "Mx_epX"          : rng.uniform(0.8, 3.5, N),
     })
 
     pids_data = rng.choice([321, 211, 2212], size=N, p=[0.50, 0.30, 0.20])
@@ -386,6 +782,12 @@ if __name__ == "__main__":
         "beta"   : rng.uniform(0.0, 1.0, N),
         "chi2pid": rng.normal(-10, 10, N),
         "vz"     : rng.uniform(-15.0, 10.0, N),
+        "Q2"     : rng.uniform(0.5, 8.0, N),
+        "W"      : rng.uniform(1.5, 4.5, N),
+        "y"      : rng.uniform(0.05, 0.95, N),
+        "Mx_eKX" : rng.uniform(0.8, 3.5, N),
+        "Mx_epiX": rng.uniform(0.8, 3.5, N),
+        "Mx_epX" : rng.uniform(0.8, 3.5, N),
     })
 
     pid_kp = SPECIES_MAP["kp"]["pid"]  # 321
@@ -476,5 +878,160 @@ if __name__ == "__main__":
         assert "MC" in msg and "Data" in msg, \
             f"FAIL error message should name both MC and Data: {e}"
         print("  Missing vz in both → SystemExit naming both ✓")
+
+    # ── 9. Q² cut ─────────────────────────────────────────────────────────────
+    q2_lo_t, q2_hi_t = 2.0, 6.0
+    mc_q2, data_q2 = _apply_q2_cut(df_mc_flt, df_data_flt2, q2_lo_t, q2_hi_t)
+    exp_mc_q2   = int(((df_mc_flt["Q2"]    > q2_lo_t) & (df_mc_flt["Q2"]    < q2_hi_t)).sum())
+    exp_data_q2 = int(((df_data_flt2["Q2"] > q2_lo_t) & (df_data_flt2["Q2"] < q2_hi_t)).sum())
+    assert len(mc_q2)   == exp_mc_q2,   f"FAIL Q2 cut MC: expected {exp_mc_q2}, got {len(mc_q2)}"
+    assert len(data_q2) == exp_data_q2, f"FAIL Q2 cut Data: expected {exp_data_q2}, got {len(data_q2)}"
+    assert len(mc_q2)   < len(df_mc_flt),    "FAIL Q2 cut should remove MC rows"
+    assert len(data_q2) < len(df_data_flt2), "FAIL Q2 cut should remove Data rows"
+    print(f"  Q2 cut [{q2_lo_t},{q2_hi_t}] MC:   {len(df_mc_flt)} → {len(mc_q2)} rows ✓")
+    print(f"  Q2 cut [{q2_lo_t},{q2_hi_t}] Data: {len(df_data_flt2)} → {len(data_q2)} rows ✓")
+
+    # Missing Q2 column triggers sys.exit
+    df_no_q2_mc = df_mc_flt.drop(columns=["Q2"])
+    try:
+        _apply_q2_cut(df_no_q2_mc, df_data_flt2, 2.0, float("inf"))
+        assert False, "FAIL should have raised SystemExit for missing Q2 in MC"
+    except SystemExit as e:
+        assert "MC" in str(e), f"FAIL Q2 error message should name MC: {e}"
+        assert "--no-q2-cut" in str(e), f"FAIL Q2 error message should mention --no-q2-cut: {e}"
+        print("  Missing Q2 in MC → SystemExit with 'MC' and '--no-q2-cut' in message ✓")
+
+    # ── 10. W cut ─────────────────────────────────────────────────────────────
+    w_lo_t, w_hi_t = 2.0, 4.0
+    mc_w, data_w = _apply_w_cut(df_mc_flt, df_data_flt2, w_lo_t, w_hi_t)
+    exp_mc_w   = int(((df_mc_flt["W"]    > w_lo_t) & (df_mc_flt["W"]    < w_hi_t)).sum())
+    exp_data_w = int(((df_data_flt2["W"] > w_lo_t) & (df_data_flt2["W"] < w_hi_t)).sum())
+    assert len(mc_w)   == exp_mc_w,   f"FAIL W cut MC: expected {exp_mc_w}, got {len(mc_w)}"
+    assert len(data_w) == exp_data_w, f"FAIL W cut Data: expected {exp_data_w}, got {len(data_w)}"
+    assert len(mc_w)   < len(df_mc_flt),    "FAIL W cut should remove MC rows"
+    assert len(data_w) < len(df_data_flt2), "FAIL W cut should remove Data rows"
+    print(f"  W cut [{w_lo_t},{w_hi_t}] MC:   {len(df_mc_flt)} → {len(mc_w)} rows ✓")
+    print(f"  W cut [{w_lo_t},{w_hi_t}] Data: {len(df_data_flt2)} → {len(data_w)} rows ✓")
+
+    # Missing W column triggers sys.exit
+    df_no_w_mc = df_mc_flt.drop(columns=["W"])
+    try:
+        _apply_w_cut(df_no_w_mc, df_data_flt2, 2.0, float("inf"))
+        assert False, "FAIL should have raised SystemExit for missing W in MC"
+    except SystemExit as e:
+        assert "MC" in str(e), f"FAIL W error message should name MC: {e}"
+        assert "--no-w-cut" in str(e), f"FAIL W error message should mention --no-w-cut: {e}"
+        print("  Missing W in MC → SystemExit with 'MC' and '--no-w-cut' in message ✓")
+
+    # ── 11. y cut ─────────────────────────────────────────────────────────────
+    y_lo_t, y_hi_t = 0.0, 0.75
+    mc_y, data_y = _apply_y_cut(df_mc_flt, df_data_flt2, y_lo_t, y_hi_t)
+    exp_mc_y   = int(((df_mc_flt["y"]    > y_lo_t) & (df_mc_flt["y"]    < y_hi_t)).sum())
+    exp_data_y = int(((df_data_flt2["y"] > y_lo_t) & (df_data_flt2["y"] < y_hi_t)).sum())
+    assert len(mc_y)   == exp_mc_y,   f"FAIL y cut MC: expected {exp_mc_y}, got {len(mc_y)}"
+    assert len(data_y) == exp_data_y, f"FAIL y cut Data: expected {exp_data_y}, got {len(data_y)}"
+    assert len(mc_y)   < len(df_mc_flt),    "FAIL y cut should remove MC rows"
+    assert len(data_y) < len(df_data_flt2), "FAIL y cut should remove Data rows"
+    print(f"  y cut [{y_lo_t},{y_hi_t}] MC:   {len(df_mc_flt)} → {len(mc_y)} rows ✓")
+    print(f"  y cut [{y_lo_t},{y_hi_t}] Data: {len(df_data_flt2)} → {len(data_y)} rows ✓")
+
+    # Missing y column triggers sys.exit
+    df_no_y_mc = df_mc_flt.drop(columns=["y"])
+    try:
+        _apply_y_cut(df_no_y_mc, df_data_flt2, 0.0, 0.75)
+        assert False, "FAIL should have raised SystemExit for missing y in MC"
+    except SystemExit as e:
+        assert "MC" in str(e), f"FAIL y error message should name MC: {e}"
+        assert "--no-y-cut" in str(e), f"FAIL y error message should mention --no-y-cut: {e}"
+        print("  Missing y in MC → SystemExit with 'MC' and '--no-y-cut' in message ✓")
+
+    # ── 12. Mx cut — kp: uses Mx_eKX column ───────────────────────────────────
+    mx_lo_t, mx_hi_t = 1.6, float("inf")
+    mc_mx, data_mx = _apply_mx_cut(df_mc_flt, df_data_flt2, mx_lo_t, mx_hi_t, "kp")
+    exp_mc_mx   = int((df_mc_flt["Mx_eKX"]    > mx_lo_t).sum())   # hi is inf
+    exp_data_mx = int((df_data_flt2["Mx_eKX"] > mx_lo_t).sum())
+    assert len(mc_mx)   == exp_mc_mx,   f"FAIL Mx(kp) cut MC: expected {exp_mc_mx}, got {len(mc_mx)}"
+    assert len(data_mx) == exp_data_mx, f"FAIL Mx(kp) cut Data: expected {exp_data_mx}, got {len(data_mx)}"
+    assert len(mc_mx)   < len(df_mc_flt),    "FAIL Mx cut should remove MC rows"
+    assert len(data_mx) < len(df_data_flt2), "FAIL Mx cut should remove Data rows"
+    print(f"  Mx(kp) cut [1.6,inf] MC(Mx_eKX):  {len(df_mc_flt)} → {len(mc_mx)} rows ✓")
+    print(f"  Mx(kp) cut [1.6,inf] Data(Mx_eKX):{len(df_data_flt2)} → {len(data_mx)} rows ✓")
+
+    # ── 13. Mx cut — pip: uses Mx_epiX column ─────────────────────────────────
+    mc_mx_pip, data_mx_pip = _apply_mx_cut(df_mc_flt, df_data_flt2, 1.5, float("inf"), "pip")
+    exp_mc_pip   = int((df_mc_flt["Mx_epiX"]    > 1.5).sum())
+    exp_data_pip = int((df_data_flt2["Mx_epiX"] > 1.5).sum())
+    assert len(mc_mx_pip)   == exp_mc_pip,   f"FAIL Mx(pip) cut MC: expected {exp_mc_pip}"
+    assert len(data_mx_pip) == exp_data_pip, f"FAIL Mx(pip) cut Data: expected {exp_data_pip}"
+    print(f"  Mx(pip) cut [1.5,inf] uses Mx_epiX column ✓")
+
+    # ── 14. Mx cut — em: raises ValueError ────────────────────────────────────
+    try:
+        _apply_mx_cut(df_mc_flt, df_data_flt2, 0.0, float("inf"), "em")
+        assert False, "FAIL should have raised ValueError for species em"
+    except ValueError as e:
+        assert "em" in str(e), f"FAIL ValueError should name species: {e}"
+        print("  _apply_mx_cut('em') → ValueError (no Mx defined for electrons) ✓")
+
+    # ── 15. Mx cut — missing column triggers sys.exit with groovy message ──────
+    df_no_mx_mc = df_mc_flt.drop(columns=["Mx_eKX"])
+    try:
+        _apply_mx_cut(df_no_mx_mc, df_data_flt2, 1.6, float("inf"), "kp")
+        assert False, "FAIL should have raised SystemExit for missing Mx_eKX in MC"
+    except SystemExit as e:
+        msg = str(e)
+        assert "MC" in msg,          f"FAIL Mx error should name MC: {e}"
+        assert "groovy" in msg,      f"FAIL Mx error should mention groovy: {e}"
+        assert "2026-06" in msg,     f"FAIL Mx error should mention 2026-06: {e}"
+        assert "--no-mx-cut" in msg, f"FAIL Mx error should mention --no-mx-cut: {e}"
+        print("  Missing Mx_eKX in MC → SystemExit with groovy-provenance message ✓")
+
+    # ── 16. --sidis-cuts resolution logic ─────────────────────────────────────
+    # Simulate what main() does for species kp with --sidis-cuts and no overrides.
+    # Expected: Q²=2-inf, W=2-inf, y=0-0.75, Mx=1.6-inf.
+    class _FakeArgs:
+        sidis_cuts = True
+        q2_cut = None;  no_q2_cut = False
+        w_cut  = None;  no_w_cut  = False
+        y_cut  = None;  no_y_cut  = False
+        mx_cut = None;  no_mx_cut = False
+        species = "kp"
+
+    fa = _FakeArgs()
+
+    def _resolve_cut_test(name, user_val, no_flag, default_pair):
+        if no_flag:
+            return False, None, None
+        if user_val is not None:
+            return True, float(user_val[0]), float(user_val[1])
+        if fa.sidis_cuts and default_pair is not None:
+            return True, float(default_pair[0]), float(default_pair[1])
+        return False, None, None
+
+    q2_on_t, q2_lo_t2, q2_hi_t2 = _resolve_cut_test("q2", fa.q2_cut, fa.no_q2_cut, _SIDIS_Q2)
+    w_on_t,  w_lo_t2,  w_hi_t2  = _resolve_cut_test("w",  fa.w_cut,  fa.no_w_cut,  _SIDIS_W)
+    y_on_t,  y_lo_t2,  y_hi_t2  = _resolve_cut_test("y",  fa.y_cut,  fa.no_y_cut,  _SIDIS_Y)
+
+    assert q2_on_t and q2_lo_t2 == 2.0 and q2_hi_t2 == float("inf"), \
+        f"FAIL sidis kp Q2 resolution: {q2_on_t}, {q2_lo_t2}, {q2_hi_t2}"
+    assert w_on_t  and w_lo_t2  == 2.0 and w_hi_t2  == float("inf"), \
+        f"FAIL sidis kp W resolution: {w_on_t}, {w_lo_t2}, {w_hi_t2}"
+    assert y_on_t  and y_lo_t2  == 0.0 and y_hi_t2  == 0.75, \
+        f"FAIL sidis kp y resolution: {y_on_t}, {y_lo_t2}, {y_hi_t2}"
+    # Mx for kp
+    mx_on_t = (not fa.no_mx_cut) and (fa.mx_cut is None) and fa.sidis_cuts and (fa.species in _SIDIS_MX_DEFAULTS)
+    mx_lo_t2 = float(_SIDIS_MX_DEFAULTS["kp"]) if mx_on_t else None
+    mx_hi_t2 = float("inf") if mx_on_t else None
+    assert mx_on_t and mx_lo_t2 == 1.6 and mx_hi_t2 == float("inf"), \
+        f"FAIL sidis kp Mx resolution: {mx_on_t}, {mx_lo_t2}, {mx_hi_t2}"
+    print("  --sidis-cuts kp: Q2=[2,inf], W=[2,inf], y=[0,0.75], Mx=[1.6,inf] ✓")
+
+    # Simulate for species em with --sidis-cuts: no Mx cut.
+    fa_em = _FakeArgs()
+    fa_em.species = "em"
+    mx_on_em = (not fa_em.no_mx_cut) and (fa_em.mx_cut is None) and \
+               fa_em.sidis_cuts and (fa_em.species in _SIDIS_MX_DEFAULTS)
+    assert not mx_on_em, "FAIL sidis em should have no Mx cut"
+    print("  --sidis-cuts em: no Mx cut (em not in _SIDIS_MX_DEFAULTS) ✓")
 
     print("\naudit_species.py self-test passed.")

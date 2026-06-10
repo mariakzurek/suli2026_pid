@@ -224,15 +224,27 @@ This is the continuation of Steps 2c and 2d from Week 2. The goal is the same: e
 
 *Procedure.* Run `scripts/compare_mc_data.py` over the variable groups defined in Week 2 (Group 1 kinematics, Group 2 ML features, Group 3 candidate features). The script compares MC (EB-K+ tracks) against data (EB-K+ tracks) independently in each of the 9 coarse (p, θ) cells (p in [1, 2], [2, 3], [3, 5] GeV × θ in [5°, 15°], [15°, 25°], [25°, 35°]). For each variable in each cell it computes three drift metrics, derives a per-cell `drift_decision`, generates the overlaid 1D distribution PNG, and writes all results to `figures/feature_audit/feature_audit_summary.csv`. Do not treat the script as a black box. Cooper must understand what each metric measures and be able to defend the decisions to Maria.
 
+The audit defaults to no event-level kinematic cuts because the trained classifier will see the uncut per-track sample at training time. KEEP/CANDIDATE/DROP decisions are made on the basis of the uncut comparison, since that comparison reflects what the classifier will actually encounter. A second audit pass with `--sidis-cuts` enabled is a useful diagnostic: variables that disagree in the uncut comparison but agree in the SIDIS regime have their disagreement driven by exclusive contamination in data, which is information worth recording but does not change the training-feature decision. Variables that disagree in both comparisons have a more fundamental MC mismodeling that the classifier will pick up.
+
 The audit is a batch operation, not interactive work. Run it from the project root using the species driver script:
 
 ```bash
+# Primary audit (no event-level cuts; matches what the classifier sees at training):
 python scripts/audit_species.py \
-    --mc   /volatile/clas12/<username>/SULI/mc_pid_training_full.root \
-    --data /volatile/clas12/<username>/SULI/data_pid_training.root \
+    --mc   /volatile/clas12/<user>/SULI/mc_pid_training_full.root \
+    --data /volatile/clas12/<user>/SULI/data_pid_training.root \
     --species kp \
     --vars all_audit kinematics \
     --outdir figures/feature_audit/kp
+
+# Diagnostic SIDIS-cut audit (event-level Q² > 2, W > 2, y < 0.75, Mx_eKX > 1.6):
+python scripts/audit_species.py \
+    --mc   /volatile/clas12/<user>/SULI/mc_pid_training_full.root \
+    --data /volatile/clas12/<user>/SULI/data_pid_training.root \
+    --species kp \
+    --vars all_audit kinematics \
+    --sidis-cuts
+# (Output auto-suffixed to figures/feature_audit/kp_sidis/)
 ```
 
 `audit_species.py` is the canonical entry point for the SULI workflow; the underlying engine (`compare_mc_data.py`) is a generic library that `audit_species.py` wraps with the project-specific species cut and truth-match logic. By default (`--truth-mode matched`), the audit covers EB-labeled K⁺ tracks that the MC truth match accepted — this is the correct sample for ML feature drift because the classifier operates on the EB-labeled population including its mis-IDs; the alternative truth modes (`pure`, `off`) are documented in `audit_species.py`'s module docstring for the rare cases where they apply. Cooper auditing other species later (π⁺ for the Δφ classifier, p for the proton channel) reruns the same script with `--species pip` or `--species p` — no new tooling required.
@@ -324,6 +336,10 @@ Concretely:
 ### Week 4 — First model: BDT (LightGBM); comparison protocol; probability calibration
 
 **Theme.** Train a gradient-boosted decision tree on the detector features. Compare to baseline on the test set. Establish the comparison protocol. Calibrate probabilities.
+
+*Training-feature set and cut conventions.* The classifier is trained on per-track detector features only — 13 features from Connor's analysis note (β, FTOF 1A/1B energy/time/path, ECAL inner/outer energy/time/path), augmented with chi2pid as a 14th feature pending audit, plus any of the candidate features (PCAL, FTOF layer 2) that survive the data/MC audit. Kinematic variables (p, θ, φ, vz, sector) are not training features — instead, MC is reweighted to data via a 15×15 (p, θ) sample-weight map applied to the classifier fit. This follows Connor's prescription to avoid the classifier learning the underlying (p, θ) distribution of kaons from the event generator.
+
+Per-track quality cuts apply at training time: EB pid match, MC truth match, FD-only, vz cut, fiducial cuts. Event-level SIDIS cuts (Q², W, y, missing mass) are NOT applied at training time. The classifier learns per-track detector responses across the broadest realistic per-track kinematic phase space. SIDIS cuts are applied downstream during the analysis-channel evaluation (Week 5+) and during the data/MC audit's diagnostic runs (Week 3 Task 3a). The audit's KEEP/CANDIDATE/DROP decisions are made on uncut comparisons because that comparison reflects what the classifier will actually encounter; SIDIS-cut audits are diagnostic only.
 
 **Cooper's tasks.**
 - Install LightGBM (`conda install -c conda-forge lightgbm`). Train a first BDT: `lgb.LGBMClassifier(n_estimators=200, learning_rate=0.05, max_depth=6, random_state=42)`. Fit on the train set. Predict probabilities on the test set. LightGBM handles missing values (-9999 or NaN) natively — no imputation needed for the first pass.
