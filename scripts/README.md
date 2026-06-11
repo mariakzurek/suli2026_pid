@@ -195,15 +195,58 @@ Data selection is always `pid == SPEC` regardless of truth mode (data has no `mc
 
 The cut is recorded in the per-run `README.md` written into the output directory.
 
-### Canonical invocation
+### Event-level kinematic cut flags
+
+| Flag | Default | Description |
+|---|---|---|
+| `--q2-cut MIN MAX` | off | Exclusive Q² range in GeV². Use `inf` for an unbounded upper end (e.g., `--q2-cut 2 inf`). |
+| `--no-q2-cut` | — | Disable Q² cut even when `--sidis-cuts` is set. |
+| `--w-cut MIN MAX` | off | Exclusive W range in GeV. |
+| `--no-w-cut` | — | Disable W cut. |
+| `--y-cut MIN MAX` | off | Exclusive inelasticity y range (dimensionless). |
+| `--no-y-cut` | — | Disable y cut. |
+| `--mx-cut MIN MAX` | off | Species-aware missing-mass cut (GeV): kp→`Mx_eKX`, pip→`Mx_epiX`, p→`Mx_epX`. Errors out cleanly for species without a defined Mx column (em, pim, kn). |
+| `--no-mx-cut` | — | Disable Mx cut. |
+
+All four cuts apply exclusive bounds: a row is kept when `MIN < value < MAX`.  The `vz` column uses the same convention (see above).
+
+#### `--sidis-cuts` convenience flag
+
+`--sidis-cuts` enables all four event-level cuts simultaneously with SIDIS-standard values: Q² > 2 GeV², W > 2 GeV, 0 < y < 0.75, and the species-appropriate Mx lower bound (1.6 GeV for kp, 1.5 for pip, 1.0 for p).  For species without a defined Mx cut (em, pim, kn), the Mx cut is silently skipped under `--sidis-cuts`.
+
+Flag priority: explicit `--no-X-cut` always wins.  An explicit `--X-cut MIN MAX` overrides the `--sidis-cuts` default for that variable.  Otherwise the cut is off unless `--sidis-cuts` is set.
+
+#### Output directory auto-suffix
+
+When `--sidis-cuts` is active and `--outdir` was not explicitly provided, the output directory is automatically suffixed with `_sidis` (e.g., `figures/feature_audit/kp` becomes `figures/feature_audit/kp_sidis`).  This keeps primary and diagnostic audit outputs visually separable without requiring the user to rename the directory manually.
+
+#### When to use which
+
+The audit defaults to no event-level kinematic cuts because the trained classifier will see the uncut per-track sample at training time.  KEEP/CANDIDATE/DROP decisions should be based on the uncut comparison.  A second audit run with `--sidis-cuts` is a useful diagnostic: variables that disagree in the uncut comparison but agree in the SIDIS regime have their disagreement driven by exclusive contamination in data.  Variables that disagree in both have more fundamental MC mismodeling.  See `notes/cooper_10week_plan.md` Task 3a for the full workflow.
+
+### Column pruning
+
+The audit loads only the ROOT branches it needs (audit variables + species selector + cut columns).  On production-scale files this is dramatically faster than loading every branch.  Pass `--load-all-cols` to override and load everything — useful for debugging or for inspecting columns beyond the audit set.  The preamble prints the column counts so you can confirm pruning is engaging.
+
+### Canonical invocations
 
 ```bash
+# Primary audit (no event-level cuts; matches what the classifier sees at training):
 python scripts/audit_species.py \
     --mc   /volatile/clas12/<username>/SULI/mc_pid_training_full.root \
-    --data /volatile/clas12/<username>/SULI/data_pid_training.root \
+    --data /volatile/clas12/<username>/SULI/data_pid_training_full.root \
     --species kp \
     --vars all_audit kinematics \
     --outdir figures/feature_audit/kp
+
+# Diagnostic SIDIS-cut audit (event-level Q² > 2, W > 2, y < 0.75, Mx_eKX > 1.6):
+python scripts/audit_species.py \
+    --mc   /volatile/clas12/<username>/SULI/mc_pid_training_full.root \
+    --data /volatile/clas12/<username>/SULI/data_pid_training_full.root \
+    --species kp \
+    --vars all_audit kinematics \
+    --sidis-cuts
+# (Output auto-suffixed to figures/feature_audit/kp_sidis/)
 ```
 
 ### What it produces
