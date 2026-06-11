@@ -33,12 +33,12 @@
 #SBATCH --error=/farm_out/%u/suli/pid_train_%A_%a.err
 #SBATCH --requeue
 
-# Account / partition: if SLURM rejects with "no default account" or
-# "no valid partition", uncomment and set these:
-#   #SBATCH --account=<your_account>
-#   #SBATCH --partition=<partition_name>
-# Find your account with: sacctmgr show user $USER
-# Find available partitions with: sinfo
+# Account: verified via `sacct --format=Account -X | sort -u`. Cluster default
+# partition is `production` (see `sinfo -s`), so no --partition directive is
+# needed for batch submissions. If batch submissions later require a specific
+# partition, add e.g.:
+#   #SBATCH --partition=production
+#SBATCH --account=clas12
 
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
@@ -52,7 +52,10 @@ if [ "${SAMPLE}" != "mc" ] && [ "${SAMPLE}" != "data" ]; then
 fi
 
 # ── SLURM environment check ───────────────────────────────────────────────────
-ARRAY_IDX="${SLURM_ARRAY_TASK_ID:?must be run as a slurm array task}"
+# Use a soft default of 0 so the script can be sourced interactively for smoke
+# testing without SLURM_ARRAY_TASK_ID being set.  Under a real sbatch array
+# submission this variable is always set by the scheduler.
+ARRAY_IDX="${SLURM_ARRAY_TASK_ID:-0}"
 
 # ── Resolve repo root ─────────────────────────────────────────────────────────
 # Script lives at: $REPO_ROOT/suli2026_pid/slurm/_pid_training_array.sh
@@ -70,6 +73,28 @@ if [ ! -f "${LIST}" ]; then
 fi
 
 # ── Module environment ────────────────────────────────────────────────────────
+# SLURM sets TMPDIR to a per-job scratch area (/scratch/slurm/<jobid>/...) where
+# the Modules system cannot write its lockfiles, causing `module load clas12`
+# to fail with "couldn't create error file ... no space left on device" even
+# though df shows ample free space. Override to /tmp (compute-node local, ~8 GB
+# free, ample for modules' tiny lockfiles). Confirmed on ifarm 2026-06.
+export TMPDIR=/tmp
+
+# Bash subshells (including SLURM batch jobs and `srun --pty bash`) don't run
+# the login init that defines the `module` function. Source it explicitly.
+if ! command -v module >/dev/null 2>&1; then
+    if [ -f /etc/profile.d/modules.sh ]; then
+        source /etc/profile.d/modules.sh
+    elif [ -f /usr/share/Modules/init/bash ]; then
+        source /usr/share/Modules/init/bash
+    else
+        echo "ERROR: cannot locate modules init script; tried"
+        echo "  /etc/profile.d/modules.sh"
+        echo "  /usr/share/Modules/init/bash"
+        echo "Set MODULESHOME or source the appropriate init manually."
+        exit 1
+    fi
+fi
 module use /cvmfs/oasis.opensciencegrid.org/jlab/scicomp/sw/el9/modulefiles
 module use /scigroup/cvmfs/hallb/clas12/sw/modulefiles
 module use /cvmfs/oasis.opensciencegrid.org/jlab/hallb/clas12/sw/modulefiles
@@ -81,9 +106,12 @@ if [ "${SAMPLE}" = "data" ]; then
 fi
 
 # JVM scratch — required to avoid java.util.logging.LogManager init failure
-# (see cooper_day1_and_week1.md, JVM scratch section)
-mkdir -p "/scratch/${USER}/tmpfs"
-export _JAVA_OPTIONS="-Djava.io.tmpdir=/scratch/${USER}/tmpfs"
+# (see cooper_day1_and_week1.md, JVM scratch section).
+# The tmpfs/auto module (loaded as a dependency of clas12) sets TMPDIR to a
+# writable location on JLab compute nodes (typically /u/home/$USER/tmpfs).
+# Defer to that; fall back to /tmp if for some reason TMPDIR is unset.
+# Do NOT mkdir here — tmpfs/auto handles creation on compute nodes.
+export _JAVA_OPTIONS="-Djava.io.tmpdir=${TMPDIR:-/tmp}"
 
 # ── Resolve this task's input HIPO file ──────────────────────────────────────
 # SLURM_ARRAY_TASK_ID is 0-indexed; sed line numbers are 1-based.
@@ -106,7 +134,18 @@ echo "Task ${ARRAY_IDX}: processing ${OUTPUT_STEM}"
 # ── Per-task scratch directory ────────────────────────────────────────────────
 # All intermediates (.txt, scratch .root) live here and are deleted on EXIT.
 # Only the final .root is copied to /volatile/ before cleanup.
-SCRATCH="/scratch/${USER}/pid_train_${SLURM_JOB_ID}_${ARRAY_IDX}"
+#
+# /scratch/$USER/ does not exist and is not user-writable on JLab compute nodes.
+# SLURM provides a per-job scratch area at /scratch/slurm/<jobid>/ which is
+# writable.  We create a per-array-task subdirectory there.  For interactive
+# (non-SLURM) testing where SLURM_JOB_ID is not set, fall back to /tmp/$USER.
+if [ -n "${SLURM_JOB_ID:-}" ]; then
+    SCRATCH_BASE="/scratch/slurm/${SLURM_JOB_ID}"
+else
+    SCRATCH_BASE="/tmp/${USER}"
+fi
+mkdir -p "${SCRATCH_BASE}"
+SCRATCH="${SCRATCH_BASE}/pid_train_${ARRAY_IDX}"
 mkdir -p "${SCRATCH}"
 trap 'echo "Cleaning scratch: ${SCRATCH}"; rm -rf "${SCRATCH}"' EXIT
 
@@ -128,6 +167,16 @@ mkdir -p "${FINAL_DIR}"
 
 # ── Pick groovy script and converter args based on sample type ────────────────
 FRAMEWORK="${REPO_ROOT}/clas12_analysis_software"
+if [ ! -d "${FRAMEWORK}" ]; then
+    echo "ERROR: clas12_analysis_software not found as a sibling of suli2026_pid."
+    echo "       Expected: ${FRAMEWORK}"
+    echo "       Detected REPO_ROOT: ${REPO_ROOT}"
+    echo ""
+    echo "       Fix: symlink your clas12_analysis_software clone into place:"
+    echo "         ln -s /path/to/your/clas12_analysis_software ${FRAMEWORK}"
+    echo "       Or edit this script to set FRAMEWORK= directly."
+    exit 1
+fi
 
 if [ "${SAMPLE}" = "mc" ]; then
     GROOVY="${FRAMEWORK}/processing_scripts/processing_mc_pid_training.groovy"

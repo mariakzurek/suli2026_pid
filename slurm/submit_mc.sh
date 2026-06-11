@@ -58,8 +58,13 @@ if [ ! -d "${MC_INPUT_DIR}" ]; then
     exit 1
 fi
 if [ ! -d "${FRAMEWORK}" ]; then
-    echo "ERROR: Framework repo not found: ${FRAMEWORK}"
-    echo "       Expected layout: ${REPO_ROOT}/clas12_analysis_software/"
+    echo "ERROR: clas12_analysis_software not found as a sibling of suli2026_pid."
+    echo "       Expected: ${FRAMEWORK}"
+    echo "       Detected REPO_ROOT: ${REPO_ROOT}"
+    echo ""
+    echo "       Fix: symlink your clas12_analysis_software clone into place:"
+    echo "         ln -s /path/to/your/clas12_analysis_software ${FRAMEWORK}"
+    echo "       Or edit this script to set FRAMEWORK= directly."
     exit 1
 fi
 if [ ! -f "${ARRAY_SCRIPT}" ]; then
@@ -68,8 +73,30 @@ if [ ! -f "${ARRAY_SCRIPT}" ]; then
 fi
 
 # ── Module load ───────────────────────────────────────────────────────────────
+# SLURM sets TMPDIR to a per-job scratch area (/scratch/slurm/<jobid>/...) where
+# the Modules system cannot write its lockfiles, causing `module load clas12`
+# to fail with "couldn't create error file ... no space left on device" even
+# though df shows ample free space. Override to /tmp (compute-node local, ~8 GB
+# free, ample for modules' tiny lockfiles). Confirmed on ifarm 2026-06.
+export TMPDIR=/tmp
+
 # Required before calling g++ (root-config) and confirming modules work.
 # If 'module load clas12' fails, the batch tasks will also fail — fix here first.
+# Bash subshells (including SLURM batch jobs and `srun --pty bash`) don't run
+# the login init that defines the `module` function. Source it explicitly.
+if ! command -v module >/dev/null 2>&1; then
+    if [ -f /etc/profile.d/modules.sh ]; then
+        source /etc/profile.d/modules.sh
+    elif [ -f /usr/share/Modules/init/bash ]; then
+        source /usr/share/Modules/init/bash
+    else
+        echo "ERROR: cannot locate modules init script; tried"
+        echo "  /etc/profile.d/modules.sh"
+        echo "  /usr/share/Modules/init/bash"
+        echo "Set MODULESHOME or source the appropriate init manually."
+        exit 1
+    fi
+fi
 module use /cvmfs/oasis.opensciencegrid.org/jlab/scicomp/sw/el9/modulefiles
 module use /scigroup/cvmfs/hallb/clas12/sw/modulefiles
 module use /cvmfs/oasis.opensciencegrid.org/jlab/hallb/clas12/sw/modulefiles
