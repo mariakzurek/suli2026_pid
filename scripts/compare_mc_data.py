@@ -25,7 +25,7 @@ Typical usage on a pandas DataFrame
     )
     print(stats)
 
-Column map (processing_mc_pid_training.groovy, 57 columns; data script has 54)
+Column map (processing_mc_pid_training.groovy, 60 columns; data script has 57)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   Event-level (1-8):   runnum, evnum, helicity, Q2, W, x, y, nu
   Per-track (9-15):    pid, p, theta, phi, vz, sector, status
@@ -46,9 +46,15 @@ Column map (processing_mc_pid_training.groovy, 57 columns; data script has 54)
       Mx_epiX  (missing mass with pi+ hypothesis, sentinel -9999 if Mx^2 < 0)
       Mx_eKX   (missing mass with K+  hypothesis, sentinel -9999 if Mx^2 < 0)
       Mx_epX   (missing mass with p   hypothesis, sentinel -9999 if Mx^2 < 0)
+  z (SIDIS energy fraction) — NOT ML features, appended at end:
+    MC cols 58-60 / Data cols 55-57:
+      z_epi  (z assuming pi+ hypothesis, sentinel -9999 if nu <= 0)
+      z_eK   (z assuming K+  hypothesis, sentinel -9999 if nu <= 0)
+      z_ep   (z assuming p   hypothesis, sentinel -9999 if nu <= 0)
 # Note: `nphe_ltcc` IS emitted by both groovy scripts (col 31).  Column count
 # was previously mis-stated as 53; actual count before this change was 54 (MC)
 # and 51 (data).  After adding Mx_epiX/Mx_eKX/Mx_epX: 57 (MC), 54 (data).
+# After adding z_epi/z_eK/z_ep:        60 (MC), 57 (data).
 
 Missing-value convention
 ~~~~~~~~~~~~~~~~~~~~~~~~
