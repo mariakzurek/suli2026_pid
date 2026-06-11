@@ -33,6 +33,13 @@ Default selections:
   must reflect that.  Use --sidis-cuts or individual --q2-cut / --w-cut /
   --y-cut / --mx-cut flags for diagnostic comparison runs.
 
+Column pruning:
+  The audit loads only the ROOT branches it needs (audit variables + species
+  selector + cut columns).  On production-scale ROOT files this is much faster
+  than loading every branch.  Use ``--load-all-cols`` to override and load
+  everything (e.g. for debugging or for ad-hoc exploration in the same Python
+  session).
+
 Canonical invocations:
 
   # Primary audit (no event-level cuts; matches what the classifier sees):
@@ -444,6 +451,14 @@ def _build_parser():
                        "Output directory is auto-suffixed with '_sidis' unless "
                        "--outdir is explicitly provided."
                    ))
+    # ── Column pruning ───────────────────────────────────────────────────────
+    p.add_argument("--load-all-cols", action="store_true",
+                   help=("Load every branch from the ROOT file.  The default "
+                         "loads only the columns the audit needs (audit "
+                         "variables + species selector + cut columns), which "
+                         "is much faster on production-scale files.  Use this "
+                         "for debugging or when you want to inspect columns "
+                         "beyond the audit set."))
     return p
 
 
@@ -580,6 +595,42 @@ def main(argv=None):
     else:
         mx_preamble = "  Mx cut: not applied"
 
+    # ── Compute needed column sets (column pruning) ────────────────────────────
+    # Loading the full ntuple (all 57 MC columns, all 54 data columns) is slow
+    # on production-scale ROOT files (~425–575 MB).  We only need: audit
+    # variables + species selector + (p, theta) for cell slicing + columns
+    # used by the enabled cuts.  Pass --load-all-cols to disable this and
+    # load everything (matches the pre-pruning default behaviour).
+
+    # Columns always required by the audit machinery regardless of flags
+    required_cols = {"pid", "p", "theta"}
+
+    # Truth-mode columns: mc_matching_pid is only present in MC
+    if args.truth_mode in ("matched", "pure"):
+        mc_only_required = {"mc_matching_pid"}
+    else:
+        mc_only_required = set()
+
+    # Columns required by enabled cuts
+    if vz_cut_enabled:
+        required_cols.add("vz")
+    if q2_on:
+        required_cols.add("Q2")
+    if w_on:
+        required_cols.add("W")
+    if y_on:
+        required_cols.add("y")
+    if mx_on:
+        required_cols.add(_MX_SPECIES[args.species])  # e.g. "Mx_eKX"
+
+    if getattr(args, "load_all_cols", False):
+        mc_cols   = None
+        data_cols = None
+    else:
+        mc_cols   = sorted(set(variables) | required_cols | mc_only_required)
+        data_cols = sorted(set(variables) | required_cols)
+
+    # ── Preamble ───────────────────────────────────────────────────────────────
     print(f"\n{'='*65}")
     print(f"audit_species.py  —  {label} (pid={pid})")
     print(f"{'='*65}")
@@ -597,12 +648,19 @@ def main(argv=None):
     print(f"  Variables   : {variables}")
     print(f"  Output dir  : {outdir}")
     print(f"  Bins        : {args.bins}   Normalize: {not args.no_normalize}")
+    if mc_cols is None:
+        print(f"  Columns      : all (--load-all-cols set)")
+    else:
+        n_audit = len(variables)
+        n_sel   = len(mc_cols) - len([c for c in mc_cols if c in variables])
+        print(f"  Columns      : {n_audit} audit + {n_sel} selection/cut "
+              f"({len(mc_cols)} MC cols requested; --load-all-cols to override)")
 
     # ── Load files ─────────────────────────────────────────────────────────────
     print(f"\nLoading MC:   {args.mc}")
-    df_mc_raw   = _load_file(args.mc,   max_rows=args.max_rows)
+    df_mc_raw   = _load_file(args.mc,   max_rows=args.max_rows, branches=mc_cols)
     print(f"Loading Data: {args.data}")
-    df_data_raw = _load_file(args.data, max_rows=args.max_rows)
+    df_data_raw = _load_file(args.data, max_rows=args.max_rows, branches=data_cols)
 
     # ── Filter by species (+ truth match for MC) ───────────────────────────────
     df_mc   = _filter_mc(df_mc_raw,   pid, args.truth_mode)

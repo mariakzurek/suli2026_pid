@@ -1681,8 +1681,46 @@ def _resolve_variables(var_list):
     return out
 
 
-def _load_file(path, max_rows=None):
-    """Load a ROOT or Parquet file into a pandas DataFrame."""
+def _load_file(path, max_rows=None, branches=None):
+    """Load a ROOT or Parquet file into a pandas DataFrame.
+
+    WHAT IT DOES
+    ------------
+    Reads a ROOT TTree (via uproot) or a Parquet file into a pandas DataFrame.
+    Supports the "file.root:TreeName" colon syntax for non-default tree names.
+
+    WHEN TO USE IT
+    --------------
+    Call this from audit drivers (e.g. audit_species.py) to load the raw
+    ntuple before any species or quality cuts.  Pass ``branches`` to restrict
+    which columns are read from ROOT; this avoids deserialising every branch
+    in production-scale files (425–575 MB) when only a subset is needed.
+
+    PITFALLS
+    --------
+    * For parquet files the ``branches`` argument is currently ignored; the
+      entire file is loaded and pandas slicing happens in the caller.  Parquet
+      inputs are not used in production; column filtering there adds complexity
+      for no practical benefit.
+    * If a branch listed in ``branches`` is absent from the tree, uproot raises
+      an error.  This function catches that case and re-raises with a message
+      that names the missing column(s) and the file path so the caller can
+      diagnose whether the file is too old or the column name is wrong.
+
+    Parameters
+    ----------
+    path : str
+        Path to the ROOT or Parquet file.  ROOT files support the
+        "file.root:TreeName" colon syntax.
+    max_rows : int or None
+        If provided, load at most this many rows (ROOT: ``entry_stop``).
+    branches : list of str or None
+        If provided, only load these branches from the ROOT tree.  If None
+        (default), load all branches — same behaviour as before this parameter
+        was added.  This is a substantial speed-up on production-scale ROOT
+        files when the caller knows in advance which columns it needs.
+        For parquet files this argument is currently ignored.
+    """
     if path.endswith(".parquet") or path.endswith(".pq"):
         df = pd.read_parquet(path)
         if max_rows is not None:
@@ -1710,9 +1748,30 @@ def _load_file(path, max_rows=None):
     with uproot.open(file_path) as f:
         tree = f[tree_name]
         entry_stop = max_rows
-        df = tree.arrays(library="pd", entry_stop=entry_stop)
+        n_total_branches = len(tree.keys())
+        try:
+            df = tree.arrays(expressions=branches, library="pd",
+                             entry_stop=entry_stop)
+        except Exception as e:
+            # uproot raises KeyInFileError, KeyError, or similar when a
+            # requested branch is absent.  Give the caller a clear message
+            # that names the missing branch(es) and the file so they know
+            # whether the file is too old or the column name is wrong.
+            available = set(tree.keys())
+            if branches is not None:
+                missing = sorted(set(branches) - available)
+                if missing:
+                    raise RuntimeError(
+                        f"Branches not present in {file_path}: {missing}\n"
+                        f"Available branches: {sorted(available)}"
+                    ) from e
+            raise  # re-raise original if it's not a missing-branch issue
 
-    print(f"  Loaded {len(df):,} rows from {file_path}  (tree: {tree_name})")
+    if branches is not None:
+        print(f"  Loaded {len(df):,} rows × {len(df.columns)} of "
+              f"{n_total_branches} columns from {file_path}  (tree: {tree_name})")
+    else:
+        print(f"  Loaded {len(df):,} rows from {file_path}  (tree: {tree_name})")
     return df
 
 
