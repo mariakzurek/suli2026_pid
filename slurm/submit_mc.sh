@@ -123,12 +123,11 @@ echo "Compile OK: ${FRAMEWORK}/processing_scripts/convert_txt_to_root"
 # frequent, mitigate by rsyncing clas12_analysis_software/ to a per-submission
 # directory before submitting (see design spec §7.5).
 
-# ── JVM scratch directory ─────────────────────────────────────────────────────
-mkdir -p "/scratch/${USER}/tmpfs"
-
 # ── Build sorted HIPO file list ───────────────────────────────────────────────
+# -L follows symlinks; -type f skips dangling symlinks (i.e. the _0 stub file
+# that caused "Input HIPO file does not exist" on the first test run).
 echo "Scanning ${MC_INPUT_DIR} for HIPO files ..."
-find "${MC_INPUT_DIR}" -name '*.hipo' | sort > "${FILE_LIST}"
+find -L "${MC_INPUT_DIR}" -name '*.hipo' -type f 2>/dev/null | sort > "${FILE_LIST}"
 TOTAL=$(wc -l < "${FILE_LIST}")
 if [ "${TOTAL}" -eq 0 ]; then
     echo "ERROR: No .hipo files found in ${MC_INPUT_DIR}"

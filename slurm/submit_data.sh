@@ -136,12 +136,11 @@ echo "Compile OK: ${FRAMEWORK}/processing_scripts/convert_txt_to_root"
 
 # NOTE ON JAR-SWAP RACE: see submit_mc.sh for explanation.
 
-# ── JVM scratch directory ─────────────────────────────────────────────────────
-mkdir -p "/scratch/${USER}/tmpfs"
-
 # ── Build sorted HIPO file list ───────────────────────────────────────────────
+# -L follows symlinks; -type f skips dangling symlinks (i.e. any _0 stub files
+# that caused "Input HIPO file does not exist" on test runs).
 echo "Scanning ${DATA_INPUT_DIR} for HIPO files ..."
-find "${DATA_INPUT_DIR}" -maxdepth 1 -name '*.hipo' | sort > "${FILE_LIST}"
+find -L "${DATA_INPUT_DIR}" -maxdepth 1 -name '*.hipo' -type f 2>/dev/null | sort > "${FILE_LIST}"
 TOTAL=$(wc -l < "${FILE_LIST}")
 if [ "${TOTAL}" -eq 0 ]; then
     echo "ERROR: No .hipo files found in ${DATA_INPUT_DIR}"

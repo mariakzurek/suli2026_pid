@@ -133,19 +133,25 @@ echo "Task ${ARRAY_IDX}: processing ${OUTPUT_STEM}"
 
 # ── Per-task scratch directory ────────────────────────────────────────────────
 # All intermediates (.txt, scratch .root) live here and are deleted on EXIT.
-# Only the final .root is copied to /volatile/ before cleanup.
+# Only the final .root is moved to /volatile/ before cleanup.
 #
-# /scratch/$USER/ does not exist and is not user-writable on JLab compute nodes.
-# SLURM provides a per-job scratch area at /scratch/slurm/<jobid>/ which is
-# writable.  We create a per-array-task subdirectory there.  For interactive
-# (non-SLURM) testing where SLURM_JOB_ID is not set, fall back to /tmp/$USER.
-if [ -n "${SLURM_JOB_ID:-}" ]; then
-    SCRATCH_BASE="/scratch/slurm/${SLURM_JOB_ID}"
+# Scratch base: /volatile/ is JLab's batch-processing scratch tier (parallel
+# filesystem, large quota, fast I/O). DO NOT use:
+#   - /scratch/$USER     (doesn't exist on compute nodes)
+#   - /scratch/slurm/... (project-quota-limited, ~MB scale)
+#   - $TMPDIR / ~/tmpfs  (home quota, ~25 GB)
+# Fallback to /tmp/$USER for interactive (non-SLURM) testing.
+if [ -d "/volatile/clas12/${USER}" ]; then
+    SCRATCH_BASE="/volatile/clas12/${USER}/SULI/scratch"
 else
     SCRATCH_BASE="/tmp/${USER}"
 fi
 mkdir -p "${SCRATCH_BASE}"
-SCRATCH="${SCRATCH_BASE}/pid_train_${ARRAY_IDX}"
+SCRATCH="${SCRATCH_BASE}/pid_train_${SLURM_ARRAY_TASK_ID:-local}"
+
+# Defensive: clear stale scratch from previous failed runs whose trap-on-EXIT
+# cleanup didn't fire (e.g., script killed externally).
+rm -rf "${SCRATCH}"
 mkdir -p "${SCRATCH}"
 trap 'echo "Cleaning scratch: ${SCRATCH}"; rm -rf "${SCRATCH}"' EXIT
 
@@ -154,7 +160,7 @@ trap 'echo "Cleaning scratch: ${SCRATCH}"; rm -rf "${SCRATCH}"' EXIT
 # it a directory containing exactly one symlink so it processes exactly one file.
 INPUT_DIR="${SCRATCH}/input"
 mkdir -p "${INPUT_DIR}"
-ln -sf "${INPUT_HIPO}" "${INPUT_DIR}/"
+ln -sf "${INPUT_HIPO}" "${INPUT_DIR}/${OUTPUT_STEM}.hipo"
 
 # ── Intermediate and final output paths ──────────────────────────────────────
 OUTPUT_TXT="${SCRATCH}/${OUTPUT_STEM}.txt"
@@ -268,10 +274,12 @@ if [ ! -s "${OUTPUT_ROOT}" ]; then
     exit 1
 fi
 
-# ── Copy final ROOT to /volatile/ ────────────────────────────────────────────
-# Only the .root is copied.  The .txt and scratch .root are deleted by the EXIT
-# trap, so /volatile/ never receives the .txt and scratch never accumulates.
-cp "${OUTPUT_ROOT}" "${FINAL_ROOT}"
+# ── Move final ROOT to /volatile/ ────────────────────────────────────────────
+# Only the .root is moved.  The .txt is deleted by the EXIT trap.
+# mv is used (not cp) because SCRATCH and FINAL_DIR are both on /volatile/ —
+# same filesystem → instant inode rename.  If they ever land on different
+# filesystems mv falls back to copy+delete, so this is safe either way.
+mv "${OUTPUT_ROOT}" "${FINAL_ROOT}"
 
 ROOT_SIZE=$(du -sh "${FINAL_ROOT}" | cut -f1)
 echo "DONE  task=${ARRAY_IDX}  stem=${OUTPUT_STEM}  size=${ROOT_SIZE}"
