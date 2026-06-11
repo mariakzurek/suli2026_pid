@@ -1749,23 +1749,45 @@ def _load_file(path, max_rows=None, branches=None):
         tree = f[tree_name]
         entry_stop = max_rows
         n_total_branches = len(tree.keys())
-        try:
-            df = tree.arrays(expressions=branches, library="pd",
-                             entry_stop=entry_stop)
-        except Exception as e:
-            # uproot raises KeyInFileError, KeyError, or similar when a
-            # requested branch is absent.  Give the caller a clear message
-            # that names the missing branch(es) and the file so they know
-            # whether the file is too old or the column name is wrong.
+
+        # Pre-flight: verify all requested branches exist before calling
+        # tree.arrays().  filter_name= silently skips non-matching names so
+        # we must check ourselves to preserve the clear error message.
+        if branches is not None:
             available = set(tree.keys())
-            if branches is not None:
-                missing = sorted(set(branches) - available)
-                if missing:
-                    raise RuntimeError(
-                        f"Branches not present in {file_path}: {missing}\n"
-                        f"Available branches: {sorted(available)}"
-                    ) from e
-            raise  # re-raise original if it's not a missing-branch issue
+            missing = sorted(set(branches) - available)
+            if missing:
+                raise RuntimeError(
+                    f"Branches not present in {file_path}: {missing}\n"
+                    f"Available branches: {sorted(available)}"
+                )
+
+        # Use filter_name= (not expressions=) so uproot takes the fast path
+        # for exact branch names and skips the expression-evaluation pipeline.
+        # filter_name=None is uproot's default and reads all branches.
+        #
+        # Use the numpy fast path then convert to pandas manually. uproot's
+        # `library="pd"` triggers an awkward-array-based conversion that scales
+        # superlinearly with column count (~80s for 10 columns on a 3M-row file);
+        # `library="np"` + pd.DataFrame is typically 10-30x faster on flat-branch
+        # trees because it bypasses awkward entirely. Verified on ifarm against
+        # pid_training_mx.root, 2026-06.
+        np_arrays = tree.arrays(filter_name=branches, library="np",
+                                entry_stop=entry_stop)
+        df = pd.DataFrame(np_arrays)
+
+        # Post-flight: confirm every requested branch made it into the
+        # DataFrame (a branch-type uproot can't decode would silently vanish).
+        if branches is not None:
+            got = set(df.columns)
+            missing_after = sorted(set(branches) - got)
+            if missing_after:
+                raise RuntimeError(
+                    f"Requested branches missing from loaded DataFrame for "
+                    f"{file_path}: {missing_after}\n"
+                    f"This usually indicates a branch type uproot couldn't "
+                    f"decode.  Got columns: {sorted(got)}"
+                )
 
     if branches is not None:
         print(f"  Loaded {len(df):,} rows × {len(df.columns)} of "
