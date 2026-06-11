@@ -64,8 +64,10 @@ ARRAY_IDX="${SLURM_ARRAY_TASK_ID:-0}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
-# File list was written by submit_*.sh
-LIST="${SCRIPT_DIR}/_${SAMPLE}_file_list.txt"
+# File list was written by submit_*.sh.
+# Prefer the FILE_LIST path the submitter passed via --export, falling back
+# to auto-detection from script location for interactive testing.
+LIST="${FILE_LIST:-${SCRIPT_DIR}/_${SAMPLE}_file_list.txt}"
 if [ ! -f "${LIST}" ]; then
     echo "ERROR: File list not found: ${LIST}"
     echo "       Run submit_${SAMPLE}.sh first."
@@ -172,7 +174,9 @@ FINAL_ROOT="${FINAL_DIR}/${OUTPUT_STEM}.root"
 mkdir -p "${FINAL_DIR}"
 
 # ── Pick groovy script and converter args based on sample type ────────────────
-FRAMEWORK="${REPO_ROOT}/clas12_analysis_software"
+# Prefer the FRAMEWORK path the submitter passed via --export, falling back
+# to deriving from script location for interactive testing.
+FRAMEWORK="${FRAMEWORK:-${REPO_ROOT}/clas12_analysis_software}"
 if [ ! -d "${FRAMEWORK}" ]; then
     echo "ERROR: clas12_analysis_software not found as a sibling of suli2026_pid."
     echo "       Expected: ${FRAMEWORK}"

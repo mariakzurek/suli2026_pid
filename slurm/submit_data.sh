@@ -174,9 +174,16 @@ mkdir -p "${OUTPUT_DIR}"
 # ── Submit slurm array ────────────────────────────────────────────────────────
 # %50 caps concurrent tasks to avoid hammering the filesystem.
 # The array script takes one positional arg: the sample type ("data").
+# --export=ALL,... forwards the current environment (same as SLURM default) PLUS
+# the explicit path variables.  This is required because SLURM copies the script
+# to a per-job spool directory (/var/spool/slurm/d/jobXXX/) before execution, so
+# BASH_SOURCE[0] inside the array task resolves to that spool path — NOT to the
+# original slurm/ directory.  Without --export the file-list and framework paths
+# derived from BASH_SOURCE[0] would be wrong in batch.
 echo "Submitting slurm array (0-${LAST_IDX}%50) ..."
 JOB_ID=$(sbatch --parsable \
     --array="0-${LAST_IDX}%50" \
+    --export=ALL,FILE_LIST="${FILE_LIST}",FRAMEWORK="${FRAMEWORK}",REPO_ROOT="${REPO_ROOT}" \
     "${ARRAY_SCRIPT}" data)
 
 echo ""
