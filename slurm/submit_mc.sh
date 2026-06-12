@@ -3,16 +3,22 @@
 # submit_mc.sh — submit the MC PID-training ntuple production as a slurm array
 #
 # Usage (from the suli2026_pid/ repo root on ifarm):
-#   ./slurm/submit_mc.sh [N_FILES]
+#   ./slurm/submit_mc.sh [N_FILES] [--force]
 #
 #   N_FILES  (optional) Number of HIPO files to process.
-#            Default: all files found in the MC source directory (~318).
-#            Pass a small number (e.g. 2) for a smoke test.
+#            Default: all files in the MC source directory that don't yet have
+#            a corresponding output ROOT (i.e., resume-friendly behavior).
+#
+#   --force  (optional) Reprocess all input files, including ones with existing
+#            outputs. Useful when the groovy schema changed and old outputs
+#            are stale.
 #
 # Examples:
 #   cd ~/CLAS/SULI/suli2026_pid
-#   ./slurm/submit_mc.sh          # full run (~318 tasks)
-#   ./slurm/submit_mc.sh 2        # smoke test (2 tasks)
+#   ./slurm/submit_mc.sh                  # all missing files
+#   ./slurm/submit_mc.sh 5                # at most 5 missing files (smoke test)
+#   ./slurm/submit_mc.sh --force          # reprocess all input files
+#   ./slurm/submit_mc.sh 5 --force        # reprocess 5 files regardless
 #
 # SLURM ACCOUNT / PARTITION NOTE:
 # ─────────────────────────────────────────────────────────────────────────────
@@ -50,7 +56,14 @@ FILE_LIST="${SCRIPT_DIR}/_mc_file_list.txt"
 ARRAY_SCRIPT="${SCRIPT_DIR}/_pid_training_array.sh"
 
 # ── Args ─────────────────────────────────────────────────────────────────────
-N_LIMIT="${1:-0}"   # 0 means "all files"
+FORCE=0
+N_LIMIT=0
+for arg in "$@"; do
+    case "$arg" in
+        --force|-f) FORCE=1 ;;
+        *)          N_LIMIT="$arg" ;;
+    esac
+done
 
 # ── Preflight checks ─────────────────────────────────────────────────────────
 if [ ! -d "${MC_INPUT_DIR}" ]; then
@@ -127,11 +140,34 @@ echo "Compile OK: ${FRAMEWORK}/processing_scripts/convert_txt_to_root"
 # -L follows symlinks; -type f skips dangling symlinks (i.e. the _0 stub file
 # that caused "Input HIPO file does not exist" on the first test run).
 echo "Scanning ${MC_INPUT_DIR} for HIPO files ..."
-find -L "${MC_INPUT_DIR}" -name '*.hipo' -type f 2>/dev/null | sort > "${FILE_LIST}"
+find -L "${MC_INPUT_DIR}" -name '*.hipo' -type f 2>/dev/null | sort > "${FILE_LIST}.all"
+TOTAL_ALL=$(wc -l < "${FILE_LIST}.all")
+
+if [ "${FORCE}" -eq 1 ]; then
+    echo "  --force enabled: processing all ${TOTAL_ALL} input files (existing outputs will be overwritten)."
+    cp "${FILE_LIST}.all" "${FILE_LIST}"
+else
+    # Skip files whose output ROOT already exists
+    > "${FILE_LIST}"
+    skipped=0
+    while IFS= read -r hipo_path; do
+        stem=$(basename "${hipo_path}" .hipo)
+        if [ -f "${OUTPUT_DIR}/${stem}.root" ]; then
+            skipped=$((skipped + 1))
+        else
+            echo "${hipo_path}" >> "${FILE_LIST}"
+        fi
+    done < "${FILE_LIST}.all"
+    echo "  Found ${TOTAL_ALL} input HIPO files."
+    echo "  ${skipped} already have outputs (skipped). Pass --force to reprocess."
+fi
+rm -f "${FILE_LIST}.all"
+
 TOTAL=$(wc -l < "${FILE_LIST}")
 if [ "${TOTAL}" -eq 0 ]; then
-    echo "ERROR: No .hipo files found in ${MC_INPUT_DIR}"
-    exit 1
+    echo "Nothing to do — all input files already have outputs (or no input files found)."
+    echo "Pass --force to reprocess everything."
+    exit 0
 fi
 
 # Truncate list to N_LIMIT if requested
@@ -145,9 +181,10 @@ fi
 LAST_IDX=$((N_FILES - 1))
 
 echo "File list written: ${FILE_LIST}"
-echo "  Total HIPO files found : ${TOTAL}"
-echo "  Files to submit        : ${N_FILES}"
-echo "  Array indices          : 0–${LAST_IDX}"
+echo "  Input HIPO files found  : ${TOTAL_ALL}"
+echo "  Already have outputs    : ${skipped:-0}"
+echo "  Files queued for SLURM  : ${N_FILES}"
+echo "  Array indices           : 0-${LAST_IDX}"
 
 # ── Create output directory ───────────────────────────────────────────────────
 mkdir -p "${OUTPUT_DIR}"

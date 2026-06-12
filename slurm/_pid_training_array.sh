@@ -157,6 +157,37 @@ rm -rf "${SCRATCH}"
 mkdir -p "${SCRATCH}"
 trap 'echo "Cleaning scratch: ${SCRATCH}"; rm -rf "${SCRATCH}"' EXIT
 
+# ── Resolve shared framework path ────────────────────────────────────────────
+# Prefer the FRAMEWORK path the submitter passed via --export, falling back
+# to deriving from script location for interactive testing.
+FRAMEWORK="${FRAMEWORK:-${REPO_ROOT}/clas12_analysis_software}"
+if [ ! -d "${FRAMEWORK}" ]; then
+    echo "ERROR: clas12_analysis_software not found as a sibling of suli2026_pid."
+    echo "       Expected: ${FRAMEWORK}"
+    echo "       Detected REPO_ROOT: ${REPO_ROOT}"
+    echo ""
+    echo "       Fix: symlink your clas12_analysis_software clone into place:"
+    echo "         ln -s /path/to/your/clas12_analysis_software ${FRAMEWORK}"
+    echo "       Or edit this script to set FRAMEWORK= directly."
+    exit 1
+fi
+
+# ── Per-task framework copy to avoid run-groovy jar-swap race ────────────────
+# coatjava/bin/run-groovy unconditionally does on every invocation:
+#   rm coatjava/lib/services/processing_classes.jar
+#   cp processing_classes/dist/processing_classes.jar coatjava/lib/services/
+# With up to 50 array tasks running concurrently from a shared framework
+# checkout these two ops race, producing a momentarily absent jar and
+# ClassNotFoundException failures across the entire job (confirmed: job 5185666,
+# 300/300 tasks failed in ~7 s each).
+# Fix: each task rsyncs the framework (~75 MB) into its own private scratch
+# directory and runs run-groovy from there.  No two tasks share the jar file.
+# Overhead: ~16 s per task on /volatile/; acceptable at 5–10 min per task.
+TASK_FRAMEWORK="${SCRATCH}/framework"
+echo "Rsyncing framework to per-task scratch: ${TASK_FRAMEWORK}"
+rsync -a --exclude='.git' "${FRAMEWORK}/" "${TASK_FRAMEWORK}/"
+echo "Framework rsync done."
+
 # ── Symlink the one HIPO file into a flat per-task input directory ────────────
 # The groovy script scans args[0] recursively for *.hipo (spec §1.2).  We give
 # it a directory containing exactly one symlink so it processes exactly one file.
@@ -173,29 +204,14 @@ FINAL_ROOT="${FINAL_DIR}/${OUTPUT_STEM}.root"
 # Output directory must exist (created by submit_*.sh, but guard here too)
 mkdir -p "${FINAL_DIR}"
 
-# ── Pick groovy script and converter args based on sample type ────────────────
-# Prefer the FRAMEWORK path the submitter passed via --export, falling back
-# to deriving from script location for interactive testing.
-FRAMEWORK="${FRAMEWORK:-${REPO_ROOT}/clas12_analysis_software}"
-if [ ! -d "${FRAMEWORK}" ]; then
-    echo "ERROR: clas12_analysis_software not found as a sibling of suli2026_pid."
-    echo "       Expected: ${FRAMEWORK}"
-    echo "       Detected REPO_ROOT: ${REPO_ROOT}"
-    echo ""
-    echo "       Fix: symlink your clas12_analysis_software clone into place:"
-    echo "         ln -s /path/to/your/clas12_analysis_software ${FRAMEWORK}"
-    echo "       Or edit this script to set FRAMEWORK= directly."
-    exit 1
-fi
-
 if [ "${SAMPLE}" = "mc" ]; then
-    GROOVY="${FRAMEWORK}/processing_scripts/processing_mc_pid_training.groovy"
+    GROOVY="${TASK_FRAMEWORK}/processing_scripts/processing_mc_pid_training.groovy"
     # runnum_override=11 forces MC mode (bypasses QA; see spec §1.1 and §1.8)
     RUNNUM_OVERRIDE="11"
     SCRIPT_INDEX=7
     IS_MC=1
 elif [ "${SAMPLE}" = "data" ]; then
-    GROOVY="${FRAMEWORK}/processing_scripts/processing_data_pid_training.groovy"
+    GROOVY="${TASK_FRAMEWORK}/processing_scripts/processing_data_pid_training.groovy"
     # No runnum_override for data: per-run lookup drives beam energy and QADB
     RUNNUM_OVERRIDE=""
     SCRIPT_INDEX=8
@@ -212,20 +228,6 @@ if [ ! -x "${CONVERTER}" ]; then
     exit 1
 fi
 
-# ── NOTE ON run-groovy JAR-SWAP RACE ─────────────────────────────────────────
-# coatjava/bin/run-groovy lines 3–4 do:
-#   rm coatjava/lib/services/processing_classes.jar
-#   cp processing_classes/dist/processing_classes.jar coatjava/lib/services/
-# With many array tasks running concurrently on the SAME framework checkout,
-# these two operations race and can produce a momentarily absent jar, causing
-# ClassNotFoundException failures in some tasks.
-#
-# For this first production run this risk is accepted — tasks are requeueable
-# and resubmit_failed.sh handles recovery.  If ClassNotFound errors appear in
-# the .err logs, the fix is to rsync clas12_analysis_software/ into a
-# per-submission directory before submitting and point GROOVY/CONVERTER at the
-# copy (see design spec §7.5 for the rsync pattern).
-
 # ── Run groovy ───────────────────────────────────────────────────────────────
 # Bypass processing.csh entirely (see spec §1.5):
 #   - processing.csh would run `git pull` and recompile the converter per task.
@@ -241,11 +243,11 @@ fi
 #   runnum    = RUNNUM_OVERRIDE (11 for MC; omitted entirely for data)
 #
 echo "--- groovy start: $(date) ---"
-cd "${FRAMEWORK}"
+cd "${TASK_FRAMEWORK}"
 # For data, RUNNUM_OVERRIDE is empty; the unquoted expansion produces no extra
 # argument, so the groovy receives exactly 4 positional args (no override).
 # shellcheck disable=SC2086
-"${FRAMEWORK}/coatjava/bin/run-groovy" \
+"${TASK_FRAMEWORK}/coatjava/bin/run-groovy" \
     "${GROOVY}" \
     "${INPUT_DIR}" \
     "${OUTPUT_TXT}" \
