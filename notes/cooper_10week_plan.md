@@ -169,7 +169,7 @@ The per-variable decision is: **KEEP** (use in training), **CANDIDATE** (evaluat
   - `ecin_time` (col 26), `ecout_time` (col 27)
   - `ecin_path` (col 28), `ecout_path` (col 29)
 
-**Group 3 — Candidate additional features** (Connor dropped these; Cooper evaluates whether they agree well enough to include):
+**Group 3 — Candidate additional features**:
   - `pcal_energy` (col 31), `pcal_time` (col 32), `pcal_path` (col 33)
   - `ftof_energy_2` (col 34), `ftof_time_2` (col 35), `ftof_path_2` (col 36)
 
@@ -177,7 +177,7 @@ For each variable, confirm the hit-fraction (fraction of tracks with a non-missi
 
 **Step 2d — (p, θ) data/MC comparison for the reweighting decision.** *(Not completed in Week 2 — carried over into Week 3. See Week 3 Task 3a for the full task description and output requirements.)*
 
-Even though `p` and `theta` are not ML training features, comparing their 2D distributions between MC and data is critical for Task 3 (Connor's reweighting). Connor's reweighting computes 2D data/MC ratios in (p, θ) bins and reweights MC events to match data; before deciding whether to use that approach, we need to know whether the distributions actually differ and by how much.
+Even though `p` and `theta` are not ML training features, comparing their 2D distributions between MC and data is critical for Task 3. Reweighting computes 2D data/MC ratios in (p, θ) bins and reweights MC events to match data; before deciding whether to use that approach, we need to know whether the distributions actually differ and by how much.
 
 Cooper must:
   - Plot the 2D (p, θ) distribution for MC (EB-K+ tracks) and for data (EB-K+ tracks) side by side, using the same binning as the analysis grid.
@@ -304,7 +304,6 @@ Concretely:
 - Approve the train/val/test split.
 - 1-hour meeting: walk through the baseline contamination plot. Decide whether the (p, theta) binning needs revision before Week 4.
 - Check in with Cooper on Python/ML progress. If reading is not getting done, adjust Week 4 expectations.
-- **Make decision on hyperon-tagged kaon-truth channel** (see Decision Points). This decision blocks Week 8 planning.
 - **Sign off on the Week 1-2 report draft** after all Overleaf comments are resolved and the PDF compiles clean.
 - If Cooper has not used slurm arrays before, help set up the submission script at the start of the week — do not let this block ntuple production past Tuesday.
 
@@ -326,7 +325,6 @@ Concretely:
 - **Data sample is not cached or access is slow.** Files in `/cache/` may need to be staged from tape. Severity M. Mitigation: check file availability with `ls -lh` on the target directory at the start of the week; if files need staging, submit the staging request immediately and work on the audit and report while waiting.
 - slurm jobs fail or queue indefinitely. Severity M. Mitigation: run a small test array (5–10 jobs) before submitting the full batch. Check output logs before assuming all jobs completed.
 - **Three drift metrics give conflicting signals on edge-case variables.** Severity L. This is expected on variables near the CANDIDATE/DROP boundary — one metric flags DROP while the two others say KEEP. The combined `drift_decision` rule handles the common cases, but edge cases require visual cross-check of the per-cell PNGs to determine whether the flagging metric is responding to a real shape difference or a low-statistics artifact. Visual inspection resolves the ambiguity; do not resolve it by ignoring the metric.
-- Truth-matching efficiency on `clasdis` not what Connor reports (he used |Δφ| < 6°, |Δθ| < 2°). Severity L. Mitigation: log the match efficiency as a sanity number.
 - Report polish takes longer than expected if many Overleaf comments require substantive revisions. Severity M. Mitigation: address comments in priority order — physics content first, prose last. A clean compile with all comments resolved is the minimum bar.
 
 **Fallback / scope-down.** If full-sample MC processing does not complete by Friday, proceed to Week 4 with whatever is on disk and re-run the remainder in the background. Do not block Week 4 on ntuple completion. If the report draft is not signed off by Friday, carry the final PI sign-off into the first day of Week 4.
@@ -337,7 +335,7 @@ Concretely:
 
 **Theme.** Train a gradient-boosted decision tree on the detector features. Compare to baseline on the test set. Establish the comparison protocol. Calibrate probabilities.
 
-*Training-feature set and cut conventions.* The classifier is trained on per-track detector features only — 13 features from Connor's analysis note (β, FTOF 1A/1B energy/time/path, ECAL inner/outer energy/time/path), augmented with chi2pid as a 14th feature pending audit, plus any of the candidate features (PCAL, FTOF layer 2) that survive the data/MC audit. Kinematic variables (p, θ, φ, vz, sector) are not training features — instead, MC is reweighted to data via a 15×15 (p, θ) sample-weight map applied to the classifier fit. This follows Connor's prescription to avoid the classifier learning the underlying (p, θ) distribution of kaons from the event generator.
+*Training-feature set and cut conventions.* The classifier is trained on per-track detector features only — possibly β, FTOF 1A/1B energy/time/path, ECAL inner/outer energy/time/path, augmented with chi2pid as a 14th feature pending audit, plus any of the candidate features (PCAL, FTOF layer 2) that survive the data/MC audit. Kinematic variables (p, θ, φ, vz, sector) are not training features — instead, MC is reweighted to data via a 15×15 (p, θ) sample-weight map applied to the classifier fit. This is to avoid the classifier learning the underlying (p, θ) distribution of kaons from the event generator.
 
 Per-track quality cuts apply at training time: EB pid match, MC truth match, FD-only, vz cut, fiducial cuts. Event-level SIDIS cuts (Q², W, y, missing mass) are NOT applied at training time. The classifier learns per-track detector responses across the broadest realistic per-track kinematic phase space. SIDIS cuts are applied downstream during the analysis-channel evaluation (Week 5+) and during the data/MC audit's diagnostic runs (Week 3 Task 3a). The audit's KEEP/CANDIDATE/DROP decisions are made on uncut comparisons because that comparison reflects what the classifier will actually encounter; SIDIS-cut audits are diagnostic only.
 
@@ -593,7 +591,7 @@ Do not drop: the headline improvement number, the report, the poster. These are 
 
 - **FD-only.** All training and evaluation done with `status` in [2000, 4000). Verified by `generic_tests.forward_detector_cut`. CD tracks excluded from this entire project.
 - **chi2pid as feature, not cut.** The training script does NOT cut on chi2pid. The baseline DOES apply the pass-2 momentum-dependent chi2pid cut (`passes_kplus_chi2pid_cut` in `scripts/baseline_chi2pid.py`); the older loose form `|chi2pid| < 3` is not the production baseline. The ML uses chi2pid as one input feature among many. This is the central methodological point: we are using ML to learn a better cut than the standard one, not to replace chi2pid.
-- **MC truth matching.** Geometric: `|delta phi| < 6°, |delta theta| < 2°`. Same as Connor. Tracks with no MC match within this window are dropped from the training set (they cannot have a truth label).
+- **MC truth matching.** Geometric: `|delta phi| < 6°, |delta theta| < 2°`. Tracks with no MC match within this window are dropped from the training set (they cannot have a truth label).
 - **Energy-loss and momentum corrections.** Applied at the groovy level via `analysis_fitter` infrastructure for electrons; not applied for K+ (Hayward's code has no kaon corrections; this is a known limitation common to cut-based and ML approaches equally).
 - **Reproducibility.** All sklearn fits with `random_state=42`. All split file lists committed to repo. All slurm submission scripts committed. README must explain how to go from clean checkout to trained model in one command.
 - **Honesty.** If a measurement disagrees with another, say so. The missing-mass method and MC-truth are independent by construction: if they disagree, that is part of the result, not a problem to paper over.

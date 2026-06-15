@@ -19,6 +19,21 @@ files, not a single merged ROOT.
 
 ---
 
+## BDT training (Week 4)
+
+For training the ML classifier after ntuple production is complete, see the
+separate runbook at `slurm/README_training.md`.  Short version:
+
+```bash
+./slurm/check_farm_access.sh         # preflight
+./slurm/submit_training_bdt.sh       # canonical sbatch run
+```
+
+Scripts: `submit_training_bdt.sh` (wrapper) · `_training_bdt_job.sh` (worker)
+Training scripts: `scripts/training/{build_dataset,train_bdt,evaluate}.py`
+
+---
+
 ## Full workflow
 
 ```bash
