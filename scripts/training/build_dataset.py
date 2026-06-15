@@ -440,7 +440,7 @@ def build_dataset(
         missing_stems = []
 
         for stem in stems:
-            root_path = mc_dir / f"{stem}.root"
+            root_path = mc_dir / f"{stem}"    #editted by CB
             if not root_path.exists():
                 missing_stems.append(stem)
                 print(f"  [{split}] WARNING: file not found: {root_path}", file=sys.stderr)
