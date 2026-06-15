@@ -16,3 +16,10 @@
 #
 # DO NOT add kinematic columns (p, theta, phi, vz, sector) or label/pid columns
 # here — build_dataset.py always includes those regardless of this file.
+
+ftof_energy_1B
+ftof_time_1B
+ftof_path_1B 
+chi2pid
+beta
+
