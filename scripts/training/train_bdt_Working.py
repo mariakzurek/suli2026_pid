@@ -404,7 +404,7 @@ def train_bdt(
         objective="binary",
         random_state=random_state,
         n_jobs=-1,
-        verbose=1,
+        verbose=-1,
     )
     if lgb_kwargs:
         default_lgb.update(lgb_kwargs)
@@ -427,7 +427,7 @@ def train_bdt(
     # ── Platt calibration ──────────────────────────────────────────────────────
     print("Fitting Platt calibration on held-out calibration slice ...")
     calibrated_clf = CalibratedClassifierCV(
-        estimator=clf, method="sigmoid", cv=None      #cv="prefit is broken. 3 works but is very very slow"
+        estimator=clf, method="sigmoid", cv=3      #cv="prefit is broken. 3 works but is very very slow"
     )
     calibrated_clf.fit(X_cal, y_cal)
     print("  Calibration fit complete.")
