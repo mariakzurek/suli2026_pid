@@ -345,8 +345,8 @@ def train_bdt(
     y_val = df_val["label"].astype(np.int8).to_numpy()
 
     # DEBUG: use only first 1000 events
-    X_full = X_full[:1000]
-    y_full = y_full[:1000]
+    #X_full = X_full[:1000]
+    #y_full = y_full[:1000]
 
     n_train_full = len(X_full)
     n_val = len(X_val)

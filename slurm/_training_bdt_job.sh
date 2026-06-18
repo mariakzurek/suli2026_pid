@@ -20,7 +20,7 @@
 #SBATCH --time=01:00:00
 #SBATCH --mem=8G
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=32
+#SBATCH --cpus-per-task=16
 #SBATCH --output=/farm_out/%u/suli/training_bdt_%j.out
 #SBATCH --error=/farm_out/%u/suli/training_bdt_%j.err
 #SBATCH --requeue
