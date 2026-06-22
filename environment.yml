@@ -11,7 +11,7 @@ dependencies:
   - numpy
   - pandas
   - matplotlib
-  - scikit-learn
+  - scikit-learn=1.5.2
   - uproot
   - awkward
   - pip

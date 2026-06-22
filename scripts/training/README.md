@@ -9,6 +9,12 @@ default JupyterHub kernel is not this env — see the three-tier guide in
 
 ---
 
+## FIXING PREFIT ERROR IN TRAIN_BDT.PY
+if the error that prefit is not recognized in train_bdt.py make sure sklearn is properly installed
+run pip install -U scikit-learn in a jupyter notebook or python file in the suli2026_pid to make sure it is in the enviroment.
+
+The working version of sklearn when this issue was first discovered was 1.9.0, so anything later should work barring a deprication of prefit for cv
+
 ## `build_dataset.py`
 
 ### WHAT IT DOES

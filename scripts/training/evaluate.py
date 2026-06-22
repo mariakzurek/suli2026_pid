@@ -1,7 +1,7 @@
 """
 evaluate.py — Per-(p,θ)-bin threshold sweep + baseline comparison on the test set.
 
-WHAT IT DOES
+WHAT IT DOES  
 ------------
 Loads the calibrated model from train_bdt.py and the test parquet from
 build_dataset.py.  Sweeps classification thresholds in each (p, θ) bin and
@@ -57,7 +57,7 @@ Usage:
 
 import argparse
 import pathlib
-import sys
+
 
 import joblib
 import matplotlib
@@ -66,17 +66,24 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import numpy as np
 import pandas as pd
+import json
+
+import sys
+from pathlib import Path
+
+sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 # Must be invoked from the repo root (~/CLAS/SULI/suli2026_pid/) so that the
 # package import below resolves.  The SLURM worker (cd "${REPO_ROOT}/suli2026_pid")
 # and the interactive Tier-2 workflow both satisfy this requirement.
 from scripts.baseline_chi2pid import passes_kplus_chi2pid_cut
 
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Default (p, θ) bin edges from Week 2 convention.
 # These match the audit grid; change with --p-edges and --theta-edges.
 # ──────────────────────────────────────────────────────────────────────────────
-DEFAULT_P_EDGES     = [1.0, 2.0, 3.0, 4.0, 5.0]   # GeV/c
+DEFAULT_P_EDGES     = [0.5, 1.4, 2.3, 3.2]   # GeV/c
 DEFAULT_THETA_EDGES = [5.0, 15.0, 25.0, 35.0]      # degrees
 
 # Minimum labeled rows (label.notna()) per bin to report metrics.
@@ -116,7 +123,7 @@ def _bin_metrics_at_threshold(df_bin: pd.DataFrame, threshold: float) -> dict:
     PITFALLS
     --------
     * label.notna() in Int8 nullable arrays requires pd.notna() or .isna().
-    * Returns NaN for any metric whose denominator is 0.
+    * Returns NaN for any metric whose denominator is 0.  
     """
     score = df_bin["score"].to_numpy(dtype=np.float64)
     label = df_bin["label"]
@@ -329,43 +336,7 @@ def evaluate_model(
     threshold_grid=None,
     overwrite: bool = False,
 ) -> pd.DataFrame:
-    """
-    Per-bin threshold sweep and baseline comparison on the test set.
 
-    WHAT IT DOES
-    ------------
-    1. Loads the model and test parquet.
-    2. Adds BDT scores to the test set.
-    3. For each (p, θ) bin: sweeps thresholds, computes (eff_K, C_pi, C_p),
-       and computes baseline chi2pid metrics.
-    4. For each bin: interpolates the BDT threshold that matches baseline
-       eff_K; records matched BDT C_pi.  Does the reverse (matched-contam).
-    5. Writes per_bin_sweep.csv and comparison_summary.csv.
-    6. Produces both headline heatmap PNGs and READMEs.
-
-    Parameters
-    ----------
-    model_path : path to model.joblib produced by train_bdt.py
-    test_path : path to test.parquet produced by build_dataset.py
-    p_edges : list of momentum bin edges (GeV/c); default [1,2,3,4,5]
-    theta_edges : list of polar-angle bin edges (deg); default [5,15,25,35]
-    outdir : directory to write outputs
-    threshold_grid : optional (low, high, n) tuple for threshold sweep;
-        default: np.linspace(0.01, 0.99, 99)
-    overwrite : if False, error if per_bin_sweep.csv already exists
-
-    Returns
-    -------
-    comparison_summary DataFrame
-
-    PITFALLS
-    --------
-    * Never use train.parquet or val.parquet here — test only.
-    * Bins where n_label < LOW_STAT_THRESHOLD are overlaid with '///' hatching.
-    * The headline plot uses shared color scale (vmin=0, vmax determined by
-      the non-low-stat BDT bin with the highest C_pi); if all bins are
-      low-stat, the plot has no colored cells.
-    """
     outdir = pathlib.Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
@@ -384,30 +355,23 @@ def evaluate_model(
     df = pd.read_parquet(str(test_path))
     print(f"  Test rows: {len(df):,}")
 
-    # Read feature list from model (via the underlying LightGBM booster).
-    # The calibrated wrapper stores feature names on the base estimator.
-    try:
-        # CalibratedClassifierCV stores the base estimator as .estimator
-        base_clf = model.estimator
-        feature_names = base_clf.booster_.feature_name()
-    except AttributeError:
-        # Fallback: try model directly
-        try:
-            feature_names = model.booster_.feature_name()
-        except AttributeError:
-            # Last resort: use all float columns except known non-feature ones.
-            non_feat = {"p", "theta", "phi", "vz", "sector", "chi2pid",
-                        "pid", "mc_matching_pid", "label"}
-            feature_names = [c for c in df.columns
-                             if c not in non_feat and df[c].dtype in (np.float32, np.float64)]
-            print(f"  WARNING: Could not read feature names from model; "
-                  f"using {len(feature_names)} float columns as features.",
-                  file=sys.stderr)
+    # ── LOAD FEATURE NAMES FROM MANIFEST (FIXED PART) ─────────────────────────
+    manifest_path = pathlib.Path(test_path).resolve().parents[0] / "manifest.json"
 
-    print(f"  Features ({len(feature_names)}): {feature_names}")
+    if not manifest_path.exists():
+        raise FileNotFoundError(f"Manifest not found at {manifest_path}")
 
+    with open(manifest_path, "r") as f:
+        manifest = json.load(f)
+
+    feature_names = manifest["feature_list"]
+
+    print(f"  Features (from manifest): {len(feature_names)}")
+
+    # ── Build feature matrix ───────────────────────────────────────────────────
     X_test = df[feature_names].to_numpy(dtype=np.float32, na_value=np.nan)
     scores = model.predict_proba(X_test)[:, 1]
+
     df = df.copy()
     df["score"] = scores
 

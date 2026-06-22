@@ -79,6 +79,7 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import train_test_split
 
+
 # LightGBM import — provides a clear error if not installed.
 try:
     from lightgbm import LGBMClassifier
@@ -343,6 +344,8 @@ def train_bdt(
     X_val = df_val[feature_list].to_numpy(dtype=np.float32, na_value=np.nan)
     y_val = df_val["label"].astype(np.int8).to_numpy()
 
+    
+
     n_train_full = len(X_full)
     n_val = len(X_val)
     print(f"  Train (full): {n_train_full:,} rows, Val: {n_val:,} rows")
@@ -404,7 +407,7 @@ def train_bdt(
         objective="binary",
         random_state=random_state,
         n_jobs=-1,
-        verbose=-1,
+        verbose=1,
     )
     if lgb_kwargs:
         default_lgb.update(lgb_kwargs)
@@ -427,7 +430,7 @@ def train_bdt(
     # ── Platt calibration ──────────────────────────────────────────────────────
     print("Fitting Platt calibration on held-out calibration slice ...")
     calibrated_clf = CalibratedClassifierCV(
-        estimator=clf, method="sigmoid", cv="prefit"
+        estimator=clf, method="sigmoid", cv="prefit"    
     )
     calibrated_clf.fit(X_cal, y_cal)
     print("  Calibration fit complete.")
