@@ -83,7 +83,7 @@ from scripts.baseline_chi2pid import passes_kplus_chi2pid_cut
 # Default (p, θ) bin edges from Week 2 convention.
 # These match the audit grid; change with --p-edges and --theta-edges.
 # ──────────────────────────────────────────────────────────────────────────────
-DEFAULT_P_EDGES     = [1.0, 2.0, 3.0, 4.0, 5.0]   # GeV/c
+DEFAULT_P_EDGES     = [0.5, 1.4, 2.3, 3.2]   # GeV/c
 DEFAULT_THETA_EDGES = [5.0, 15.0, 25.0, 35.0]      # degrees
 
 # Minimum labeled rows (label.notna()) per bin to report metrics.
