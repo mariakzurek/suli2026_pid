@@ -8,6 +8,23 @@ fits a LightGBM binary classifier (K vs π), applies Platt calibration on a
 held-out slice of the training set (row-level, stratified, never val or test),
 and writes the fitted model, calibrator, evaluation metrics, and diagnostic plots.
 
+NEW WORKFLOW (week4-tier-flexible)
+-----------------------------------
+The training feature set is now selected at training time via --features-file,
+NOT read from manifest.json.  This decouples "what the parquet stores" from
+"what the model trains on," so Cooper can run multiple feature tier experiments
+(Tier 1, Tier 2, Tier 3) against the same parquet without rebuilding the dataset.
+
+--features-file is REQUIRED.  Pass one of:
+  scripts/training/features_tier1.txt  — minimal: beta + FTOF 1B
+  scripts/training/features_tier2.txt  — adds chi2pid + FTOF 1A
+  scripts/training/features_tier3.txt  — adds ECAL + HTCC
+or any custom file listing column names from columns_maximal.txt.
+
+The feature list is embedded in model.joblib (as a wrapper dict) so evaluate.py
+can recover it without consulting the manifest.  This avoids the staleness bug
+where the manifest might reflect a different run.
+
 BDT defaults (from cooper_10week_plan.md §300):
   n_estimators=200, learning_rate=0.05, max_depth=6,
   objective='binary', random_state=42, n_jobs=-1
@@ -19,7 +36,7 @@ remaining 80%.  This is the correct procedure: calibrate on data the BDT
 has not seen.
 
 Outputs:
-  model.joblib               fitted calibrated model (compress=3)
+  model.joblib               wrapper dict {"model": calibrated_clf, "features": feature_list}
   training_summary.csv       AUC, Brier, log-loss for train and val (pre/post cal)
   reliability_diagram.png    2-panel pre/post calibration (n_bins=10)
   roc_val.png                ROC curve on validation set
@@ -30,14 +47,17 @@ Outputs:
 WHEN TO USE
 -----------
 Run after build_dataset.py produces the three parquet files. Pass the dataset
-directory; the script reads manifest.json to find the feature list (no need to
-supply it again). Re-run with --overwrite when hyperparameters or the dataset
-change.
+directory and a features file that is a subset of columns_maximal.txt.
+Re-run with a different --features-file to try a different feature tier — no
+rebuild needed as long as the dataset was built with columns_maximal.txt.
 
 PITFALLS
 --------
-* The script reads feature_list from manifest.json, not from a features-file
-  argument. If you rebuild the dataset, the manifest changes; rerun training.
+* --features-file is REQUIRED and must name columns present in the parquet.
+  The script validates each feature against the parquet schema and fails fast
+  if any are missing, with a pointer to columns_maximal.txt.
+* The manifest's feature_list is NOT used as a default — the feature set must
+  be explicit per training run.  This prevents the silent manifest-mismatch bug.
 * The calibration slice is carved from the TRAINING split only. Val and test
   are never touched during calibration or fitting. Never evaluate calibration
   quality on the calibration slice itself; use the reliability diagram on val.
@@ -49,7 +69,8 @@ PITFALLS
 Usage:
   python scripts/training/train_bdt.py \\
       --dataset-dir /volatile/clas12/$USER/SULI/datasets/v01 \\
-      --outdir /volatile/clas12/$USER/SULI/models/v01 \\
+      --features-file scripts/training/features_tier1.txt \\
+      --outdir /volatile/clas12/$USER/SULI/models/tier1 \\
       --overwrite
 
 Smoke test (requires parquet files in --dataset-dir):
@@ -90,6 +111,102 @@ except ImportError:
         file=sys.stderr,
     )
     sys.exit(1)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Helpers
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _parse_features_file(path: pathlib.Path) -> List[str]:
+    """
+    Parse a tier features file (one column name per line, # comments stripped).
+
+    WHAT IT DOES
+    ------------
+    Reads the features file, strips blank lines and comment lines, and returns
+    a list of column names that will be used as the model's input features.
+    Errors if the file is missing or results in an empty list.
+
+    PITFALLS
+    --------
+    Column names must exactly match what is in the parquet (case-sensitive).
+    The script validates these against the parquet schema immediately after
+    parsing — a typo here will produce a clear error before any training starts.
+    """
+    lines = []
+    for raw in path.read_text().splitlines():
+        stripped = raw.strip()
+        if stripped and not stripped.startswith("#"):
+            lines.append(stripped)
+    if not lines:
+        print(
+            f"ERROR: --features-file is empty or contains only comments: {path}\n"
+            f"       Fill it with column names from scripts/training/columns_maximal.txt.\n"
+            f"       One column name per line, # for comments.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    return lines
+
+
+def _validate_features_against_parquet(
+    feature_list: List[str],
+    parquet_path: pathlib.Path,
+) -> None:
+    """
+    Validate that every feature in feature_list exists as a column in the parquet.
+
+    WHAT IT DOES
+    ------------
+    Reads only the parquet schema (no data rows loaded) using pyarrow, then
+    checks each requested feature against the available columns.  Fails fast
+    with a clear error listing missing features and pointing to columns_maximal.txt.
+
+    WHEN TO USE
+    -----------
+    Call this immediately after parsing --features-file, before loading any
+    training data.  Catches typos and schema mismatches early.
+
+    PITFALLS
+    --------
+    Uses pd.read_parquet with columns=[] to retrieve the schema; this is a
+    lightweight metadata read that does not load data rows.
+    """
+    try:
+        # Read parquet schema without loading data rows.
+        import pyarrow.parquet as pq
+        schema = pq.read_schema(str(parquet_path))
+        parquet_cols = set(schema.names)
+    except Exception:
+        # Fallback: read a zero-row slice via pandas.
+        try:
+            parquet_cols = set(pd.read_parquet(str(parquet_path), columns=[]).columns)
+            # Zero-column read returns empty; fall back to reading one row.
+            if not parquet_cols:
+                parquet_cols = set(pd.read_parquet(str(parquet_path)).columns)
+        except Exception as e:
+            print(
+                f"WARNING: Could not read parquet schema from {parquet_path}: {e}\n"
+                f"         Skipping feature validation — training may fail later.",
+                file=sys.stderr,
+            )
+            return
+
+    missing = [f for f in feature_list if f not in parquet_cols]
+    if missing:
+        print(
+            f"ERROR: The following features from --features-file are not columns "
+            f"in {parquet_path}:\n"
+            f"  {missing}\n\n"
+            f"These features are not in the parquet.  Either:\n"
+            f"  (a) The feature is already in columns_maximal.txt and was built into "
+            f"the parquet — check for a typo in your features file.\n"
+            f"  (b) The feature is NOT in columns_maximal.txt — add it there and "
+            f"rebuild the dataset with build_dataset.py --overwrite.\n\n"
+            f"Available columns in parquet: {sorted(parquet_cols)}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -253,7 +370,8 @@ def _write_readme(
             lines.append(f"- {k}: {v}\n")
     lines += [
         "\n## Outputs\n",
-        "- `model.joblib` — fitted LightGBM + Platt calibrator\n",
+        "- `model.joblib` — wrapper dict {\"model\": calibrated LightGBM + Platt calibrator, "
+        "\"features\": list of training feature names}\n",
         "- `training_summary.csv` — AUC, Brier, log-loss for train/val pre/post cal\n",
         "- `reliability_diagram.png` — calibration quality (on val set)\n",
         "- `roc_val.png` — ROC curve on val set\n",
@@ -289,13 +407,17 @@ def train_bdt(
     4. Fits LGBMClassifier on the remaining train rows.
     5. Fits Platt calibration (CalibratedClassifierCV, cv='prefit') on the
        calibration slice.
-    6. Saves model.joblib, plots, and CSVs.
+    6. Saves model.joblib as a wrapper dict {"model": calibrated_clf,
+       "features": feature_list} so evaluate.py can recover the feature list
+       without consulting the manifest.
+    7. Saves plots and CSVs.
 
     Parameters
     ----------
     train_path : path to train.parquet
     val_path : path to val.parquet
-    feature_list : list of feature column names (from manifest)
+    feature_list : list of feature column names (the training subset selected
+        by --features-file; must be a subset of the parquet's columns)
     outdir : directory to write outputs
     reweight_map : optional .npz with p_edges, theta_edges, weights arrays
     calibration_frac : fraction of train rows held out for calibration (default 0.2)
@@ -314,6 +436,11 @@ def train_bdt(
       scores → probabilities; reweighting there would distort the mapping.
     * Calibration quality is reported on the VALIDATION set, not the
        calibration slice.
+    * model.joblib is a wrapper dict, not a bare estimator.  Load it with:
+        obj = joblib.load("model.joblib")
+        model = obj["model"]
+        features = obj["features"]
+      evaluate.py handles both the wrapper dict and old bare-estimator files.
     """
     outdir = pathlib.Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
@@ -464,8 +591,15 @@ def train_bdt(
     }
 
     # ── Save model ─────────────────────────────────────────────────────────────
-    joblib.dump(calibrated_clf, str(model_path), compress=3)
+    # Wrap the model and its feature list together so evaluate.py can recover
+    # the feature list without consulting the manifest.
+    model_bundle = {
+        "model": calibrated_clf,
+        "features": feature_list,
+    }
+    joblib.dump(model_bundle, str(model_path), compress=3)
     print(f"  Model saved → {model_path}")
+    print(f"  (wrapper dict: model + features={feature_list})")
 
     # ── Training summary CSV ───────────────────────────────────────────────────
     pd.DataFrame([metrics]).to_csv(str(outdir / "training_summary.csv"), index=False)
@@ -526,6 +660,17 @@ def _parse_args(argv=None):
              "val.parquet, and manifest.json.",
     )
     p.add_argument(
+        "--features-file",
+        required=True,
+        metavar="PATH",
+        help="Text file listing column names to use as training features "
+             "(one per line, # comments allowed, blank lines ignored). "
+             "Must be a subset of the columns in the parquet "
+             "(see scripts/training/columns_maximal.txt). "
+             "Use features_tier1.txt, features_tier2.txt, or features_tier3.txt "
+             "for Week-5 tier experiments.",
+    )
+    p.add_argument(
         "--outdir",
         required=True,
         help="Output directory for model.joblib, plots, and CSVs.",
@@ -581,37 +726,46 @@ def main(argv=None):
 
     dataset_dir = pathlib.Path(args.dataset_dir)
     outdir = pathlib.Path(args.outdir)
+    features_file = pathlib.Path(args.features_file)
 
-    # Read feature list from manifest (not re-derived from command line).
-    manifest_path = dataset_dir / "manifest.json"
-    if not manifest_path.exists():
+    # ── Load and validate features file ───────────────────────────────────────
+    if not features_file.exists():
         print(
-            f"ERROR: manifest.json not found in --dataset-dir: {manifest_path}\n"
-            f"       Run build_dataset.py first.",
+            f"ERROR: --features-file not found: {features_file}\n"
+            f"       Use one of: scripts/training/features_tier{{1,2,3}}.txt\n"
+            f"       or create a custom file listing columns from columns_maximal.txt.",
             file=sys.stderr,
         )
         sys.exit(1)
 
-    manifest = json.loads(manifest_path.read_text())
-    feature_list = manifest.get("feature_list", [])
-    if not feature_list:
-        print(
-            "ERROR: manifest.json has an empty feature_list. "
-            "Rebuild the dataset with a populated --features-file.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+    feature_list = _parse_features_file(features_file)
+    print(f"Features loaded ({len(feature_list)}) from {features_file}: {feature_list}")
 
-    p_max = manifest.get("p_max")
-    print(f"Feature list ({len(feature_list)} features from manifest): {feature_list}")
-    print(f"p_max from manifest: {p_max} GeV/c")
-
+    # ── Validate parquet exists ────────────────────────────────────────────────
     train_path = dataset_dir / "train.parquet"
     val_path = dataset_dir / "val.parquet"
     for path in (train_path, val_path):
         if not path.exists():
             print(f"ERROR: Required parquet not found: {path}", file=sys.stderr)
             sys.exit(1)
+
+    # ── Validate features against parquet schema (fail fast) ──────────────────
+    print(f"Validating features against parquet schema: {train_path}")
+    _validate_features_against_parquet(feature_list, train_path)
+    print(f"  All {len(feature_list)} features present in parquet. OK.")
+
+    # ── Print manifest p_max for reference (not used to derive feature_list) ───
+    manifest_path = dataset_dir / "manifest.json"
+    if manifest_path.exists():
+        manifest = json.loads(manifest_path.read_text())
+        p_max = manifest.get("p_max")
+        print(f"p_max from manifest: {p_max} GeV/c")
+    else:
+        print(
+            f"WARNING: manifest.json not found in {dataset_dir}. "
+            f"Proceeding without p_max info.",
+            file=sys.stderr,
+        )
 
     lgb_kwargs = dict(
         n_estimators=args.n_estimators,

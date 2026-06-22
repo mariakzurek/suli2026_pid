@@ -9,6 +9,39 @@ the corresponding MC ROOT files, applies EB-K+ selection and momentum cap,
 writes three parquet files (train.parquet, val.parquet, test.parquet) and a
 JSON manifest.
 
+NEW WORKFLOW (week4-tier-flexible)
+-----------------------------------
+The dataset is built ONCE using the MAXIMAL column set (columns_maximal.txt).
+Training then picks a feature subset from those columns at load time by passing
+--features-file to train_bdt.py.  This decouples "what the parquet stores"
+from "what the model trains on," so Cooper can run multiple tier experiments
+(features_tier1.txt, features_tier2.txt, features_tier3.txt) against the same
+parquet without rebuilding.
+
+Build dataset once:
+  python scripts/training/build_dataset.py \\
+      --mc-dir /volatile/clas12/$USER/SULI/mc_v01 \\
+      --split-dir slurm \\
+      --outdir /volatile/clas12/$USER/SULI/datasets/v01 \\
+      --columns-file scripts/training/columns_maximal.txt \\
+      --p-max 3.0 --overwrite
+
+Train three tiers (no rebuild needed):
+  python scripts/training/train_bdt.py \\
+      --dataset-dir /volatile/clas12/$USER/SULI/datasets/v01 \\
+      --features-file scripts/training/features_tier1.txt \\
+      --outdir /volatile/clas12/$USER/SULI/models/tier1 --overwrite
+
+  python scripts/training/train_bdt.py \\
+      --dataset-dir /volatile/clas12/$USER/SULI/datasets/v01 \\
+      --features-file scripts/training/features_tier2.txt \\
+      --outdir /volatile/clas12/$USER/SULI/models/tier2 --overwrite
+
+  python scripts/training/train_bdt.py \\
+      --dataset-dir /volatile/clas12/$USER/SULI/datasets/v01 \\
+      --features-file scripts/training/features_tier3.txt \\
+      --outdir /volatile/clas12/$USER/SULI/models/tier3 --overwrite
+
 Dataset contract (fixed column order; downstream selects by name):
 
   Columns always present:
@@ -19,7 +52,7 @@ Dataset contract (fixed column order; downstream selects by name):
     sector    int32     CLAS12 sector (1–6)
     chi2pid   float32   required by evaluate.py baseline cut
 
-  Feature columns (from --features-file, in file order):
+  Feature columns (from --columns-file, in file order):
     <name>    float32   NaN where ntuple sentinel -9999
 
   Metadata columns always present:
@@ -37,14 +70,16 @@ Selection:
 
 WHEN TO USE
 -----------
-Run once before training, after the Week-3 audit KEEP list is finalised.
-Re-run with --overwrite whenever --features-file or --p-max changes.
-Use --max-files N for smoke tests; production runs use all files.
+Run ONCE after the Week-3 audit KEEP list is finalised and the maximal column
+set is decided. Re-run with --overwrite only when --columns-file or --p-max
+changes (i.e., when the parquet schema itself changes).  Feature changes for
+training experiments do NOT require a rebuild — just pass a different
+--features-file to train_bdt.py.
 
 PITFALLS
 --------
-* --features-file must be non-empty (pointing at the audit KEEP list); the
-  script errors rather than building an empty feature set.
+* --columns-file must be non-empty (the script errors rather than building an
+  empty column set).
 * Missing files > 5% of the split cause a hard failure unless
   --allow-missing-files is set.  Cooper cross-checks overlaps with:
     diff <(sort -u slurm/train_files.txt) \\
@@ -60,7 +95,7 @@ Usage:
       --mc-dir /volatile/clas12/$USER/SULI/mc_v01 \\
       --split-dir slurm \\
       --outdir /volatile/clas12/$USER/SULI/datasets/v01 \\
-      --features-file scripts/training/feature_list.txt \\
+      --columns-file scripts/training/columns_maximal.txt \\
       --p-max 3.0 \\
       --overwrite
 
@@ -76,6 +111,7 @@ import os
 import pathlib
 import subprocess
 import sys
+import warnings
 from typing import Dict, List, Optional
 
 import numpy as np
@@ -87,7 +123,7 @@ import pandas as pd
 
 SENTINEL = -9999
 
-# Columns always loaded regardless of features-file.
+# Columns always loaded regardless of columns-file.
 # These match the MC ntuple branch names (processing_mc_pid_training.groovy).
 _ALWAYS_COLS = ["p", "theta", "phi", "vz", "sector", "chi2pid",
                 "pid", "mc_matching_pid"]
@@ -96,25 +132,29 @@ _ALWAYS_COLS = ["p", "theta", "phi", "vz", "sector", "chi2pid",
 PID_KPLUS  = 321
 PID_PIPLUS = 211
 
+# Default columns-file, resolved relative to this script.
+_DEFAULT_COLUMNS_FILE = pathlib.Path(__file__).parent / "columns_maximal.txt"
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ──────────────────────────────────────────────────────────────────────────────
 
-def _parse_features_file(path: pathlib.Path) -> List[str]:
+def _parse_columns_file(path: pathlib.Path) -> List[str]:
     """
-    Parse the audit KEEP list (one feature name per line, # comments stripped).
+    Parse the maximal column list (one column name per line, # comments stripped).
 
     WHAT IT DOES
     ------------
-    Reads the features file, strips blank lines and comment lines, and returns
+    Reads the columns file, strips blank lines and comment lines, and returns
     a list of branch names.  Errors if the file is missing or results in an
-    empty list (the script must not silently train on zero features).
+    empty list (the script must not silently build a zero-column dataset).
 
     PITFALLS
     --------
     Branch names must match the MC ntuple exactly (case-sensitive).  A typo
-    here causes KeyError in _load_root_file, not a clean error message.
+    here causes a silent drop in _load_root_file (uproot's filter_name= skips
+    unknown branches), leaving that column all-NaN in the parquet.
     """
     lines = []
     for raw in path.read_text().splitlines():
@@ -123,7 +163,7 @@ def _parse_features_file(path: pathlib.Path) -> List[str]:
             lines.append(stripped)
     if not lines:
         print(
-            f"ERROR: --features-file is empty or contains only comments: {path}\n"
+            f"ERROR: --columns-file is empty or contains only comments: {path}\n"
             f"       Fill it with the audit KEEP list from:\n"
             f"         figures/feature_audit/kp/feature_audit_summary.csv\n"
             f"       One branch name per line, # for comments.",
@@ -294,13 +334,13 @@ def _truth_breakdown(df: pd.DataFrame, split_name: str) -> dict:
     return breakdown
 
 
-def _enforce_schema(df: pd.DataFrame, feature_list: List[str],
+def _enforce_schema(df: pd.DataFrame, column_list: List[str],
                     split_name: str) -> pd.DataFrame:
     """
     Enforce fixed column order and dtypes.
 
     Fixed schema (see module docstring):
-      p, theta, phi, vz, sector, chi2pid, <features...>,
+      p, theta, phi, vz, sector, chi2pid, <columns...>,
       pid, mc_matching_pid, label
 
     Feature columns: float32, NaN where sentinel -9999.
@@ -308,7 +348,7 @@ def _enforce_schema(df: pd.DataFrame, feature_list: List[str],
     label: int8 (train/val) or Int8 nullable (test).
     """
     # Replace sentinel with NaN in feature columns (not in pid/mc_matching_pid).
-    for col in feature_list:
+    for col in column_list:
         if col in df.columns:
             df[col] = df[col].replace(SENTINEL, np.nan).astype("float32")
         else:
@@ -328,7 +368,7 @@ def _enforce_schema(df: pd.DataFrame, feature_list: List[str],
     df["mc_matching_pid"] = df["mc_matching_pid"].astype("int32")
 
     # Fixed column order
-    cols = ["p", "theta", "phi", "vz", "sector", "chi2pid"] + feature_list + \
+    cols = ["p", "theta", "phi", "vz", "sector", "chi2pid"] + column_list + \
            ["pid", "mc_matching_pid", "label"]
     return df[[col for col in cols if col in df.columns]]
 
@@ -340,12 +380,14 @@ def _enforce_schema(df: pd.DataFrame, feature_list: List[str],
 def build_dataset(
     mc_dir: pathlib.Path,
     split_lists: Dict[str, List[str]],
-    feature_list: List[str],
     outdir: pathlib.Path,
     p_max: float,
+    column_list: Optional[List[str]] = None,
     max_files: Optional[int] = None,
     allow_missing_files: bool = False,
     overwrite: bool = False,
+    # Backward-compat alias: feature_list= is accepted but deprecated.
+    feature_list: Optional[List[str]] = None,
 ) -> Dict[str, pathlib.Path]:
     """
     Build the train/val/test parquet trio and write a JSON manifest.
@@ -357,19 +399,25 @@ def build_dataset(
     fast-path, applies EB-K+ selection and labeling, and writes parquet files
     (snappy compression) plus a manifest.json summarising provenance.
 
+    The parquet stores the MAXIMAL column set (column_list).  Training then
+    picks a subset of those columns via train_bdt.py --features-file.  This
+    means the dataset is built once and reused across many training experiments.
+
     Parameters
     ----------
     mc_dir : path to the directory containing .root files
     split_lists : dict with keys 'train', 'val', 'test' mapping to lists of
         file stems (no .root suffix)
-    feature_list : list of branch names to load (from --features-file)
     outdir : directory to write parquet files and manifest into
     p_max : momentum cap (GeV/c); rows with p >= p_max are excluded
+    column_list : list of branch names to store in the parquet (from
+        --columns-file).  If None, falls back to feature_list (deprecated).
     max_files : if set, load at most this many files per split (smoke test)
     allow_missing_files : if True, proceed even when > 5% of stems are missing;
         if False (default), raise RuntimeError
     overwrite : if True, overwrite existing outputs; if False, skip splits
         that already have parquet files
+    feature_list : DEPRECATED alias for column_list.  Emits a DeprecationWarning.
 
     Returns
     -------
@@ -377,27 +425,40 @@ def build_dataset(
 
     PITFALLS
     --------
-    * feature_list must not include the always-present columns (p, theta, phi,
+    * column_list must not include the always-present columns (p, theta, phi,
       vz, sector, chi2pid, pid, mc_matching_pid) — duplicates are silently
-      de-duped but it's cleaner to keep features-file focused on ML features.
-    * The manifest records the features_file SHA-256 at call time; if the file
+      de-duped but it's cleaner to keep columns-file focused on ML features.
+    * The manifest records the columns_file SHA-256 at call time; if the file
       changes after building, rebuild to keep manifest in sync.
     """
+    # Backward-compat: accept feature_list= as alias for column_list=.
+    if feature_list is not None and column_list is None:
+        warnings.warn(
+            "build_dataset(): feature_list= is deprecated; use column_list= instead. "
+            "The parameter controls which columns are stored in the parquet. "
+            "Feature selection for training is now done via train_bdt.py --features-file.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        column_list = feature_list
+    elif column_list is None:
+        raise ValueError("build_dataset(): column_list must be provided.")
+
     outdir = pathlib.Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
     mc_dir = pathlib.Path(mc_dir)
 
-    # Branches to load: always-present + features (de-duped, preserving order).
+    # Branches to load: always-present + columns (de-duped, preserving order).
     seen = set()
     all_branches = []
-    for col in _ALWAYS_COLS + feature_list:
+    for col in _ALWAYS_COLS + column_list:
         if col not in seen:
             seen.add(col)
             all_branches.append(col)
 
-    # Trim feature_list of any duplicates with ALWAYS_COLS.
-    feature_list_clean = [f for f in feature_list if f not in set(_ALWAYS_COLS)]
+    # Trim column_list of any duplicates with ALWAYS_COLS.
+    column_list_clean = [f for f in column_list if f not in set(_ALWAYS_COLS)]
 
     split_names = ("train", "val", "test")
     results: Dict[str, pathlib.Path] = {}
@@ -476,7 +537,7 @@ def build_dataset(
             )
 
         df_split = pd.concat(dfs, ignore_index=True)
-        df_split = _enforce_schema(df_split, feature_list_clean, split)
+        df_split = _enforce_schema(df_split, column_list_clean, split)
 
         # Write parquet with snappy compression.
         df_split.to_parquet(str(out_path), compression="snappy", index=False)
@@ -497,20 +558,20 @@ def build_dataset(
     # Layout: <repo_root>/suli2026_pid/scripts/training/build_dataset.py
     repo_root = _this_file.parent.parent.parent.parent
 
-    # SHA-256 of the features file: resolve from the default path relative to
-    # this script's location.  The kwarg was removed from the public API; we
-    # locate the file by convention (scripts/training/feature_list.txt) and
-    # also accept it via the module-level default path constant.
-    _features_file_default = pathlib.Path(__file__).parent / "feature_list.txt"
-    features_sha = (
-        _sha256_file(_features_file_default)
-        if _features_file_default.exists()
+    # SHA-256 of the columns file.
+    _columns_file_default = _DEFAULT_COLUMNS_FILE
+    columns_sha = (
+        _sha256_file(_columns_file_default)
+        if _columns_file_default.exists()
         else None
     )
 
-    # Flat manifest — no "splits" nesting wrapper.
+    # Manifest writes both `columns` (canonical) and `feature_list` (deprecated
+    # alias, same value) for backward compatibility with existing scripts that
+    # read manifest["feature_list"].  New code should read manifest["columns"].
     manifest = {
-        "feature_list":        feature_list_clean,
+        "columns":             column_list_clean,   # canonical: columns in parquet
+        "feature_list":        column_list_clean,   # DEPRECATED alias — same value
         "p_max":               p_max,
         "n_rows":              m_n_rows,
         "truth_breakdown":     m_truth_breakdown,
@@ -518,7 +579,8 @@ def build_dataset(
         "missing_file_stems":  m_missing_file_stems,
         "missing_fraction":    m_missing_fraction,
         "mc_dir":              str(mc_dir),
-        "features_file_sha256": features_sha,
+        "columns_file_sha256": columns_sha,
+        "features_file_sha256": columns_sha,  # DEPRECATED alias for columns_file_sha256
         "build_timestamp":     datetime.datetime.utcnow().isoformat() + "Z",
         "git_sha":             _git_sha(repo_root),
     }
@@ -556,10 +618,21 @@ def _parse_args(argv=None):
         help="Output directory for parquet files and manifest (default: %(default)s)",
     )
     p.add_argument(
+        "--columns-file",
+        default=str(_DEFAULT_COLUMNS_FILE),
+        dest="columns_file",
+        help="Path to the maximal column list; one branch name per line, # comments "
+             "(default: %(default)s). Controls what the parquet stores — use "
+             "train_bdt.py --features-file to select the training subset.",
+    )
+    p.add_argument(
         "--features-file",
-        default="scripts/training/feature_list.txt",
-        help="Path to the audit KEEP list; one branch name per line, # comments "
-             "(default: %(default)s)",
+        default=None,
+        dest="features_file_deprecated",
+        metavar="PATH",
+        help="DEPRECATED — use --columns-file instead. "
+             "Build-time column selection is renamed to --columns-file; "
+             "training feature selection is now done via train_bdt.py --features-file.",
     )
     p.add_argument(
         "--p-max",
@@ -595,24 +668,37 @@ def _parse_args(argv=None):
 def main(argv=None):
     args = _parse_args(argv)
 
+    # Handle deprecated --features-file flag.
+    if args.features_file_deprecated is not None:
+        print(
+            "WARNING: --features-file is deprecated for build_dataset.py. "
+            "Use --columns-file instead. Build-time column selection is renamed; "
+            "training feature selection is now done via train_bdt.py --features-file.",
+            file=sys.stderr,
+        )
+        # Only override columns_file if user did NOT also pass --columns-file explicitly.
+        # (If both are passed, --columns-file takes precedence and deprecated flag warns.)
+        columns_file_path = pathlib.Path(args.features_file_deprecated)
+    else:
+        columns_file_path = pathlib.Path(args.columns_file)
+
     # Expand $USER in mc_dir (useful when called from slurm env)
     mc_dir = pathlib.Path(os.path.expandvars(args.mc_dir))
     split_dir = pathlib.Path(args.split_dir)
     outdir = pathlib.Path(args.outdir)
-    features_file = pathlib.Path(args.features_file)
 
     # ── Validate inputs ───────────────────────────────────────────────────────
-    if not features_file.exists():
+    if not columns_file_path.exists():
         print(
-            f"ERROR: --features-file not found: {features_file}\n"
-            f"       Run the Week-3 feature audit first and fill in the KEEP list.\n"
-            f"       Reference: figures/feature_audit/kp/feature_audit_summary.csv",
+            f"ERROR: --columns-file not found: {columns_file_path}\n"
+            f"       Default is scripts/training/columns_maximal.txt.\n"
+            f"       Run the Week-3 feature audit first and fill in the KEEP list.",
             file=sys.stderr,
         )
         sys.exit(1)
 
-    feature_list = _parse_features_file(features_file)
-    print(f"Features loaded ({len(feature_list)}): {feature_list}")
+    column_list = _parse_columns_file(columns_file_path)
+    print(f"Columns loaded ({len(column_list)}) from {columns_file_path}: {column_list}")
 
     # Load split files
     split_lists: Dict[str, List[str]] = {}
@@ -621,7 +707,7 @@ def main(argv=None):
         if not split_path.exists():
             print(
                 f"ERROR: Split file not found: {split_path}\n"
-                f"       Run the Phase-0 splitter (see notes/week4_training_examples_plan.md §4)",
+                f"       Run the Phase-0 splitter (see notes/cooper_week4_walkthrough.md §3)",
                 file=sys.stderr,
             )
             sys.exit(1)
@@ -636,7 +722,7 @@ def main(argv=None):
     results = build_dataset(
         mc_dir=mc_dir,
         split_lists=split_lists,
-        feature_list=feature_list,
+        column_list=column_list,
         outdir=outdir,
         p_max=args.p_max,
         max_files=args.max_files,

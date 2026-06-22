@@ -51,8 +51,8 @@ end of Week 4 (Section 6 below explains how).
 
 1. Produce the file-level train/val/test split and commit it.
 2. Pick the upper momentum bound for the binary model from your existing plots.
-3. Run `build_dataset.py` to produce the three parquet files.
-4. Run `train_bdt.py` to fit and calibrate the BDT. Inspect the outputs.
+3. Run `build_dataset.py` to produce the three parquet files (once, using `columns_maximal.txt`).
+4. Run `train_bdt.py` to fit and calibrate the BDT. Pass `--features-file` with your chosen tier. Inspect the outputs.
 5. Run `evaluate.py` to get the per-bin comparison against chi2pid. Inspect the plots.
 6. Decide whether protons enter v2 and document the decision.
 
@@ -296,6 +296,12 @@ memorize file-level patterns — specific noise levels, occasional weird run con
 detector dead-time artifacts — that have nothing to do with physics. Your test numbers
 would look better than they really are because the model memorized the test files.
 
+**Note on feature files.** This section used to reference `feature_list.txt` as the
+file that controls what columns go into the dataset. That file is now deprecated.
+The dataset is built from `scripts/training/columns_maximal.txt` (the maximal set of
+audit-relevant columns); training picks a subset via `--features-file` pointing at
+`features_tier1.txt`, `features_tier2.txt`, or `features_tier3.txt`. See §5 below.
+
 The fix is to split by file, not by event. All events in a given file go to one of
 {train, val, test}, never to two. That way, when you evaluate on the test set, the model
 has genuinely never seen those files.
@@ -456,10 +462,16 @@ to invoke it, what it writes, and what to look for afterward.
 ### 5.1 `build_dataset.py` — ROOT files → parquet trio + manifest
 
 **What it does.** Reads every ROOT file listed in your three split text files, selects
-EB-identified K+ tracks, filters to your chosen momentum range, applies your audit's
-KEEP feature list, assigns binary labels (1 = true K+, 0 = true π+), and writes three
-parquet files: `train.parquet`, `val.parquet`, and `test.parquet`. It also writes a
-`manifest.json` — your build's provenance record.
+EB-identified K+ tracks, filters to your chosen momentum range, loads the maximal set
+of audit-relevant columns (from `scripts/training/columns_maximal.txt`), assigns binary
+labels (1 = true K+, 0 = true π+), and writes three parquet files: `train.parquet`,
+`val.parquet`, and `test.parquet`. It also writes a `manifest.json` — your build's
+provenance record.
+
+**The column list is fixed at build time and inclusive.** The parquet stores _all_
+columns in `columns_maximal.txt` — not just what the model will train on. This means
+you build the dataset _once_, then pick a training feature subset per run via
+`train_bdt.py --features-file`. No rebuild needed to try a different feature set.
 
 **What the parquet files contain.** Every row is one EB-identified K+ track. The columns
 are always in this order (the scripts select by name, not position, so order doesn't
@@ -469,8 +481,8 @@ matter to you — but it helps to know what's there):
   `int32`). Always present.
 - `chi2pid` — the experiment's standard kaon pull variable. Required by `evaluate.py` for
   the baseline comparison.
-- `<feature columns>` — whatever features your audit marked KEEP, in the order they
-  appear in `scripts/training/feature_list.txt`. Sentineled values are NaN.
+- `<feature columns>` — all columns from `scripts/training/columns_maximal.txt`, in file
+  order. Sentineled values are NaN. The training script selects a subset of these.
 - `pid` — always 321 (EB called this a K+). `int32`.
 - `mc_matching_pid` — the true PDG code from the MC match: 321 for real kaons, 211 for
   pions, 2212 for protons, −9999 for unmatched tracks.
@@ -489,15 +501,16 @@ import json
 with open("/volatile/clas12/zurek/SULI/dataset_v01/manifest.json") as f:
     m = json.load(f)
 print(m["p_max"])            # the --p-max you passed
-print(m["train"]["n_rows"])  # row counts per split
-print(m["feature_list"])     # list of feature column names that went in
+print(m["n_rows"])           # row counts per split
+print(m["columns"])          # list of column names stored in the parquet
 print(m["git_sha"])          # repo state at build time
 ```
 
-The manifest also records `features_file_sha256` (so you can detect if
-`feature_list.txt` changed between builds), `missing_fraction` (fraction of split-file
-stems that had no matching ROOT file), and `build_timestamp`. It is your paper trail if
-you ever wonder "which features did model v01 actually train on?"
+The manifest records `columns_file_sha256` (so you can detect if `columns_maximal.txt`
+changed between builds), `missing_fraction` (fraction of split-file stems that had no
+matching ROOT file), and `build_timestamp`. It is your paper trail for what the parquet
+contains. What the model actually _trains on_ is in `model.joblib["features"]` — set
+by `--features-file` at training time, not at build time.
 
 **The command you will type:**
 
@@ -509,15 +522,16 @@ python scripts/training/build_dataset.py \
     --mc-dir /volatile/clas12/zurek/SULI/mc_v01 \
     --split-dir slurm \
     --outdir /volatile/clas12/zurek/SULI/dataset_v01 \
-    --features-file scripts/training/feature_list.txt \
     --p-max 3.0
 ```
 
-Replace `3.0` with whatever you chose in Section 4. The full set of optional flags:
-`--max-files N` (only read N files — use `--max-files 2` for a smoke test before
-processing the full dataset), `--allow-missing-files` (continue even if some split-file
-stems have no matching ROOT file; normally the script refuses if more than 5% are
-missing), `--overwrite` (re-run if the output directory already exists).
+Replace `3.0` with whatever you chose in Section 4. The `--columns-file` argument
+defaults to `scripts/training/columns_maximal.txt` — leave it at the default for the
+standard build. The full set of optional flags: `--max-files N` (only read N files —
+use `--max-files 2` for a smoke test before processing the full dataset),
+`--allow-missing-files` (continue even if some split-file stems have no matching ROOT
+file; normally the script refuses if more than 5% are missing), `--overwrite` (re-run
+if the output directory already exists).
 
 **What to look at after.** The script prints a summary table at the end. Check:
 
@@ -545,21 +559,31 @@ Any lines in the diff are files that exist in one place but not the other.
 
 ### 5.2 `train_bdt.py` — fit the BDT and calibrate it
 
-**What it does.** Loads `train.parquet` and `val.parquet` from your dataset directory.
-Carves 20% of the training rows as a calibration slice (stratified by label). Trains the
-LightGBM BDT on the remaining 80%. Fits a Platt calibrator on the 20% slice. Writes
-everything you need: `model.joblib` (the calibrated model object), a
-`training_summary.csv` with AUC and Brier score on both train and val (before and after
-calibration), a `reliability_diagram.png`, a `roc_val.png`, and a
-`feature_importance.png`. It never touches `test.parquet` — that file is for
+**What it does.** Loads `train.parquet` and `val.parquet` from your dataset directory,
+selects the feature columns specified by `--features-file`, carves 20% of the training
+rows as a calibration slice (stratified by label), trains the LightGBM BDT on the
+remaining 80%, and fits a Platt calibrator on the 20% slice. Writes everything you need:
+`model.joblib`, a `training_summary.csv`, a `reliability_diagram.png`, a `roc_val.png`,
+and a `feature_importance.png`. It never touches `test.parquet` — that file is for
 `evaluate.py` only.
 
-**The command:**
+**`--features-file PATH` is required.** Pass one of the tier files:
+
+- `scripts/training/features_tier1.txt` — minimal: beta + FTOF 1B (what you used in v1)
+- `scripts/training/features_tier2.txt` — adds chi2pid + FTOF 1A
+- `scripts/training/features_tier3.txt` — adds ECAL + HTCC
+
+Or create a custom file listing column names from `scripts/training/columns_maximal.txt`.
+The script validates that every feature in your file exists as a column in the parquet
+and fails fast with a clear error if any are missing.
+
+**The command (Tier 1 example):**
 
 ```bash
 python scripts/training/train_bdt.py \
     --dataset-dir /volatile/clas12/zurek/SULI/dataset_v01 \
-    --outdir /volatile/clas12/zurek/SULI/model_v01
+    --features-file scripts/training/features_tier1.txt \
+    --outdir /volatile/clas12/zurek/SULI/model_tier1
 ```
 
 Omit `--reweight-map` for v1. Default hyperparameters: `--n-estimators 200`,
@@ -570,8 +594,9 @@ leave it out now). Pass `--overwrite` if you want to re-run and replace existing
 
 **What the script writes.** All outputs land in `--outdir`:
 
-- `model.joblib` — the calibrated model object. This is the only file `evaluate.py`
-  needs; it wraps both the BDT and the Platt calibrator.
+- `model.joblib` — wrapper dict containing the calibrated model and the feature list used
+  for training: `{"model": calibrated_clf, "features": [...]}`. `evaluate.py` reads the
+  feature list from here, so it always matches the model it loads.
 - `training_summary.csv` — one row with AUC and Brier score on train and val, before
   and after calibration.
 - `reliability_diagram.png` — two panels: raw BDT score vs. actual kaon fraction, then

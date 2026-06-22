@@ -44,6 +44,9 @@ PITFALLS
   scripts.baseline_chi2pid; it expects two numpy arrays (chi2pid, p).
 * This script evaluates on the TEST set only. It never loads train.parquet
   or val.parquet.
+* Feature names are read from model.joblib (wrapper dict {"model": ...,
+  "features": [...]}) produced by the updated train_bdt.py.  Old bare-estimator
+  model.joblib files fall back to manifest.json with a deprecation warning.
 
 Usage:
   python scripts/training/evaluate.py \\
@@ -348,25 +351,45 @@ def evaluate_model(
 
     # ── Load model ─────────────────────────────────────────────────────────────
     print(f"Loading model: {model_path}")
-    model = joblib.load(str(model_path))
+    _model_raw = joblib.load(str(model_path))
+
+    # Support both the new wrapper dict {"model": ..., "features": [...]} and
+    # old bare-estimator joblib files (backward compat).
+    if isinstance(_model_raw, dict) and "model" in _model_raw and "features" in _model_raw:
+        model = _model_raw["model"]
+        feature_names = _model_raw["features"]
+        print(f"  Features (from model.joblib wrapper): {len(feature_names)}")
+    else:
+        # Old bare-estimator model — fall back to manifest.
+        model = _model_raw
+        import warnings
+        warnings.warn(
+            "model.joblib does not contain a feature list (old format — bare estimator). "
+            "Falling back to manifest.json feature_list. "
+            "Rebuild the model with the new train_bdt.py to embed features in model.joblib.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        manifest_path = pathlib.Path(test_path).resolve().parents[0] / "manifest.json"
+        if not manifest_path.exists():
+            raise FileNotFoundError(
+                f"model.joblib has no embedded feature list and manifest.json not found at "
+                f"{manifest_path}. Cannot determine feature names."
+            )
+        with open(manifest_path, "r") as f:
+            manifest = json.load(f)
+        feature_names = manifest.get("feature_list") or manifest.get("columns")
+        if not feature_names:
+            raise ValueError(
+                f"manifest.json at {manifest_path} has no feature_list or columns field. "
+                f"Rebuild the dataset and model."
+            )
+        print(f"  Features (from manifest fallback — DEPRECATED): {len(feature_names)}")
 
     # ── Load test set ──────────────────────────────────────────────────────────
     print(f"Loading test set: {test_path}")
     df = pd.read_parquet(str(test_path))
     print(f"  Test rows: {len(df):,}")
-
-    # ── LOAD FEATURE NAMES FROM MANIFEST (FIXED PART) ─────────────────────────
-    manifest_path = pathlib.Path(test_path).resolve().parents[0] / "manifest.json"
-
-    if not manifest_path.exists():
-        raise FileNotFoundError(f"Manifest not found at {manifest_path}")
-
-    with open(manifest_path, "r") as f:
-        manifest = json.load(f)
-
-    feature_names = manifest["feature_list"]
-
-    print(f"  Features (from manifest): {len(feature_names)}")
 
     # ── Build feature matrix ───────────────────────────────────────────────────
     X_test = df[feature_names].to_numpy(dtype=np.float32, na_value=np.nan)

@@ -1,21 +1,14 @@
-# feature_list.txt — audit KEEP list for BDT training
+# DEPRECATED — use features_tier{1,2,3}.txt with train_bdt.py --features-file instead.
+# This file is no longer read by the pipeline.
 #
-# This file is read at runtime by build_dataset.py (--features-file).
-# Fill it in with the feature names that passed the Week-3 audit (KEEP or
-# CANDIDATE decisions from figures/feature_audit/kp/feature_audit_summary.csv).
+# For dataset column selection (build time), use:
+#   scripts/training/columns_maximal.txt  (passed via --columns-file to build_dataset.py)
 #
-# Format: one branch name per line, # for comments, blank lines ignored.
-# Branch names must match exactly the column names in the MC ROOT ntuples
-# under /volatile/clas12/$USER/SULI/mc_v01/.
-#
-# Example (replace with real audit KEEP list before running build_dataset.py):
-#   beta
-#   chi2pid
-#   ftof_energy_1A
-#   nphe_htcc
-#
-# DO NOT add kinematic columns (p, theta, phi, vz, sector) or label/pid columns
-# here — build_dataset.py always includes those regardless of this file.
+# For training feature selection (per run), use one of:
+#   scripts/training/features_tier1.txt  — minimal FTOF+beta
+#   scripts/training/features_tier2.txt  — adds chi2pid + FTOF 1A
+#   scripts/training/features_tier3.txt  — adds ECAL + HTCC
+# Passed via --features-file to train_bdt.py.
 
 ftof_energy_1B
 ftof_time_1B

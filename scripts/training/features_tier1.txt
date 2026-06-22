@@ -1,0 +1,6 @@
+# Tier 1 — minimal FTOF+beta. Maria/Cooper to revise based on audit and Week-5 results.
+
+beta
+ftof_energy_1B
+ftof_time_1B
+ftof_path_1B
