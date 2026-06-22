@@ -1,0 +1,41 @@
+# columns_maximal.txt — maximal column set to load into the parquet dataset.
+#
+# This file controls what columns build_dataset.py stores in the parquet files.
+# It is the INCLUSIVE "everything plausible" list — build the dataset once from
+# this list, then pick a feature SUBSET for each training run via:
+#   python scripts/training/train_bdt.py --features-file scripts/training/features_tier1.txt ...
+#
+# To add a new column: edit this file and rebuild the dataset (--overwrite).
+# To try a different feature subset for training: create or edit a tier file
+# and retrain — no rebuild needed.
+#
+# Branch names must match the MC ntuple exactly (case-sensitive).
+# Do NOT add the always-present kinematic/metadata columns here
+# (p, theta, phi, vz, sector, chi2pid, pid, mc_matching_pid) —
+# build_dataset.py always includes those regardless of this file.
+#
+# Source: compare_mc_data.py ML_FEATURES + CANDIDATE_FEATURES.
+# Cleared by the Week-3 feature audit; expand when new columns pass audit.
+
+beta
+chi2pid
+ftof_energy_1A
+ftof_energy_1B
+ftof_time_1A
+ftof_time_1B
+ftof_path_1A
+ftof_path_1B
+ecin_energy
+ecout_energy
+ecin_time
+ecout_time
+ecin_path
+ecout_path
+nphe_htcc
+nphe_ltcc
+pcal_energy
+pcal_time
+pcal_path
+ftof_energy_2
+ftof_time_2
+ftof_path_2
