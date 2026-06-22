@@ -24,8 +24,6 @@ ftof_path_1B
 ecin_time
 ecin_path
 ecin_energy
-nphe_htcc
-nphe_ltcc
 beta
 chi2pid
 
