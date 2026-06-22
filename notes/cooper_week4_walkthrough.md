@@ -461,6 +461,13 @@ to invoke it, what it writes, and what to look for afterward.
 
 ### 5.1 `build_dataset.py` — ROOT files → parquet trio + manifest
 
+> **⚠️ Week 5 note:** Your existing dataset at `/volatile/clas12/$USER/SULI/tier1/dataset_v01/`
+> was built with only 4 columns (the old Tier 1 list) and is **stale for Week 5**.
+> It does not contain `chi2pid`, FTOF 1A, ECAL, or the other columns Tier 2 and Tier 3 need.
+> You must rebuild with `columns_maximal.txt` before running any tier comparison — see the
+> "BEFORE YOU START WEEK 5" block at the top of `scripts/training/README.md`.
+> Use `/work/clas12/$USER/SULI/datasets/v02` as the output directory (not `/volatile/`).
+
 **What it does.** Reads every ROOT file listed in your three split text files, selects
 EB-identified K+ tracks, filters to your chosen momentum range, loads the maximal set
 of audit-relevant columns (from `scripts/training/columns_maximal.txt`), assigns binary
@@ -579,9 +586,12 @@ and fails fast with a clear error if any are missing.
 
 **The command (Tier 1 example):**
 
+> **⚠️ Week 5 note:** Point `--dataset-dir` at the rebuilt `v02` dataset
+> (`/work/clas12/$USER/SULI/datasets/v02`), not the old `v01` on `/volatile/`.
+
 ```bash
 python scripts/training/train_bdt.py \
-    --dataset-dir /volatile/clas12/zurek/SULI/dataset_v01 \
+    --dataset-dir /work/clas12/$USER/SULI/datasets/v02 \
     --features-file scripts/training/features_tier1.txt \
     --outdir /volatile/clas12/zurek/SULI/model_tier1
 ```

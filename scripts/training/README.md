@@ -9,6 +9,33 @@ default JupyterHub kernel is not this env — see the three-tier guide in
 
 ---
 
+## ⚠️ BEFORE YOU START WEEK 5
+
+Your existing dataset at `/volatile/clas12/$USER/SULI/tier1/dataset_v01/`
+was built with only 4 columns (Tier 1). It does NOT contain the columns
+Tier 2 and Tier 3 need (chi2pid, ECAL, FTOF 1A, etc.).
+
+**You must rebuild the dataset once with the maximal column set** before
+running any tier comparison. Store on `/work/` not `/volatile/` since
+`/volatile/` purges after ~2 weeks:
+
+```bash
+python scripts/training/build_dataset.py \
+    --mc-dir    /volatile/clas12/$USER/SULI/mc_v01 \
+    --split-dir slurm \
+    --outdir    /work/clas12/$USER/SULI/datasets/v02 \
+    --p-max     3.2 --overwrite
+```
+
+This uses `columns_maximal.txt` by default (22 audit-relevant columns).
+Use a new version suffix (`v02`) so the old `v01` dataset on /volatile/
+is not affected.
+
+After the rebuild, all three tier trainings read from the same
+`datasets/v02/` directory — no further rebuilds needed.
+
+---
+
 ## Workflow
 
 The pipeline has three steps and is designed so that **the dataset is built
