@@ -1,6 +1,8 @@
-# Tier 1 — minimal FTOF+beta. Maria/Cooper to revise based on audit and Week-5 results.
+# Tier 1 — 5 features: beta + chi2pid + FTOF 1B panel.
+# chi2pid is the single strongest discriminator and belongs in the minimal tier.
 
 beta
+chi2pid
 ftof_energy_1B
 ftof_time_1B
 ftof_path_1B
