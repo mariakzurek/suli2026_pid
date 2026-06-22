@@ -1,0 +1,10 @@
+# Tier 2 — adds chi2pid and FTOF 1A. Expected to improve K/π separation materially.
+
+beta
+ftof_energy_1B
+ftof_time_1B
+ftof_path_1B
+chi2pid
+ftof_energy_1A
+ftof_time_1A
+ftof_path_1A
