@@ -8,10 +8,10 @@ chi2pid
 ftof_energy_1A
 ftof_time_1A
 ftof_path_1A
-ecin_energy
 ecout_energy
-ecin_time
 ecout_time
-ecin_path
 ecout_path
 nphe_htcc
+ecin_path
+ecin_energy
+ecin_time

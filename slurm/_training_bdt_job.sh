@@ -26,7 +26,6 @@ export TMPDIR=/tmp
 
 echo "Initializing conda..."
 
-
 if ! command -v conda >/dev/null 2>&1; then
     echo "ERROR: conda command not found"
     exit 1
@@ -46,6 +45,7 @@ echo "Python: $(which python)"
 : "${REPO_ROOT:?ERROR: REPO_ROOT not set}"
 : "${DATASET_DIR:?ERROR: DATASET_DIR not set}"
 : "${MODEL_DIR:?ERROR: MODEL_DIR not set}"
+: "${FEATURES_FILE:?ERROR: FEATURES_FILE not set}"
 
 REWEIGHT_MAP="${REWEIGHT_MAP:-}"
 
@@ -92,6 +92,7 @@ PYTHON_CMD=(
     python
     scripts/training/train_bdt.py
     --dataset-dir "${DATASET_DIR}"
+    --features-file "${FEATURES_FILE}"
     --outdir "${MODEL_DIR}"
     --overwrite
 )
@@ -105,6 +106,7 @@ echo "BDT training job start"
 echo "host: $(hostname)"
 echo "git: ${GIT_SHA}"
 echo "python: $(which python)"
+echo "features: ${FEATURES_FILE}"
 echo "command: ${PYTHON_CMD[*]}"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
@@ -114,4 +116,5 @@ echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "BDT training DONE"
 echo "model: ${MODEL_DIR}/model.joblib"
+echo "features: ${FEATURES_FILE}"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

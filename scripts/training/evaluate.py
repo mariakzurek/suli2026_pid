@@ -304,8 +304,26 @@ def _heatmap(
                     linewidth=0.5,
                 ))
             else:
-                ax.text(ti + 0.5, pi + 0.5, f"{data[pi, ti]:.2f}",
-                        ha="center", va="center", fontsize=7, color="white")
+                if score_map is not None:
+                    ax.text(
+                    ti + 0.5,
+                    pi + 0.5,
+                    f"Cπ={data[pi, ti]:.2f}\nBDT={score_map[pi, ti]:.2f}",
+                    ha="center",
+                    va="center",
+                    fontsize=6,
+                    color="white",
+                    )
+                else:
+                    ax.text(
+                    ti + 0.5,
+                    pi + 0.5,
+                    f"{data[pi, ti]:.2f}",
+                    ha="center",
+                    va="center",
+                    fontsize=7,
+                    color="white",
+                    )
 
     # Axis labels: theta on x, p on y.
     ax.set_xticks(np.arange(n_t) + 0.5)
