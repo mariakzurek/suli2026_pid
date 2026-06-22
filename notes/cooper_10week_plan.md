@@ -151,9 +151,9 @@ Write a Python script `compute_baseline.py` that:
   - **2D maps in (p, theta):** `N(π→K)`, `N(K→K)`, `N(p→K)` (raw count maps); then `C^{π→K}`, `P^K`, `C^{p→K}` (purity/contamination maps); then `ε^K`, `M^{K→π}`, `M^{K→p}` (efficiency/mis-ID maps). Nine panels in a 3×3 layout.
   - **1D plots vs p at fixed theta:** at two representative theta slices (e.g., ~9° and ~25°), plot `P^K`, `C^{π→K}`, `C^{p→K}` vs p in one panel row, and `ε^K`, `M^{K→π}`, `M^{K→p}` vs p in a second panel row. These are the key diagnostic plots for the report and poster.
 
-**Step 2c — Data/MC variable-agreement audit.** *(Not completed in Week 2 — carried over into Week 3. See Week 3 Task 3a for the full task description and output requirements.)*
+**Step 2c — Data/MC variable-agreement audit.** *(Not completed in Week 2 — carried over into Week 3. See Week 3 for the full task description and output requirements.)*
 
-The PI's standing requirement: *"if MC and data variables disagree, we cannot use them for ML."* Before any ML training begins, audit every relevant variable in the training ntuple against the RGA pass-2 data distribution for the EB-K+ subsample. Do the comparison in coarse (p, θ) slices — use 9 cells: p in [1, 2], [2, 3], [3, 5] GeV crossed with θ in [5°, 15°], [15°, 25°], [25°, 35°]. In each cell, overlay MC (EB-K+ tracks) and data (EB-K+ tracks) 1D distributions. The per-cell decision is determined by the three-metric drift system (PSI, Wasserstein-norm, max local residual) described in Week 3 Task 3a — not by a single KS threshold.
+The PI's standing requirement: *"if MC and data variables disagree, we cannot use them for ML."* Before any ML training begins, audit every relevant variable in the training ntuple against the RGA pass-2 data distribution for the EB-K+ subsample. Do the comparison in coarse (p, θ) slices — use 9 cells: p in [1, 2], [2, 3], [3, 5] GeV crossed with θ in [5°, 15°], [15°, 25°], [25°, 35°]. In each cell, overlay MC (EB-K+ tracks) and data (EB-K+ tracks) 1D distributions. Flag any variable where KS distance > 0.05 or the shapes disagree visually.
 
 The per-variable decision is: **KEEP** (use in training), **CANDIDATE** (evaluate further before including), or **DROP** (exclude from training until understood).
 
@@ -169,21 +169,21 @@ The per-variable decision is: **KEEP** (use in training), **CANDIDATE** (evaluat
   - `ecin_time` (col 26), `ecout_time` (col 27)
   - `ecin_path` (col 28), `ecout_path` (col 29)
 
-**Group 3 — Candidate additional features**:
+**Group 3 — Candidate additional features** (Connor dropped these; Cooper evaluates whether they agree well enough to include):
   - `pcal_energy` (col 31), `pcal_time` (col 32), `pcal_path` (col 33)
   - `ftof_energy_2` (col 34), `ftof_time_2` (col 35), `ftof_path_2` (col 36)
 
-For each variable, confirm the hit-fraction (fraction of tracks with a non-missing/-9999 value) in MC and in data. Save all overlaid distribution plots to `figures/feature_audit/`. The authoritative machine-readable record is `figures/feature_audit/feature_audit_summary.csv`; the audit narrative is written up in Section 5 of the Week 1-2 report (Task 3c).
+For each variable, confirm the hit-fraction (fraction of tracks with a non-missing/-9999 value) in MC and in data. Save all overlaid distribution plots to `/figures/feature_audit/`. Summarize the per-feature KEEP / CANDIDATE / DROP decision table in `notes/feature_audit.md`.
 
-**Step 2d — (p, θ) data/MC comparison for the reweighting decision.** *(Not completed in Week 2 — carried over into Week 3. See Week 3 Task 3a for the full task description and output requirements.)*
+**Step 2d — (p, θ) data/MC comparison for the reweighting decision.** *(Not completed in Week 2 — carried over into Week 3. See Week 3 for the full task description and output requirements.)*
 
-Even though `p` and `theta` are not ML training features, comparing their 2D distributions between MC and data is critical for Task 3. Reweighting computes 2D data/MC ratios in (p, θ) bins and reweights MC events to match data; before deciding whether to use that approach, we need to know whether the distributions actually differ and by how much.
+Even though `p` and `theta` are not ML training features, comparing their 2D distributions between MC and data is critical for Task 3 (Connor's reweighting). Connor's reweighting computes 2D data/MC ratios in (p, θ) bins and reweights MC events to match data; before deciding whether to use that approach, we need to know whether the distributions actually differ and by how much.
 
 Cooper must:
   - Plot the 2D (p, θ) distribution for MC (EB-K+ tracks) and for data (EB-K+ tracks) side by side, using the same binning as the analysis grid.
   - Plot the ratio map data/MC in (p, θ).
   - Write a one-paragraph interpretation: if the ratio map is roughly flat (data/MC ≈ 1 everywhere), no reweighting is needed. If it varies significantly across (p, θ) space, reweighting is warranted and should be implemented in Week 4.
-  - Save figures to `figures/feature_audit/ptheta_data_mc_ratio.png`. The one-paragraph interpretation of the ratio map goes into Section 5 of the Week 1-2 report (Task 3c).
+  - Save figures to `/figures/feature_audit/ptheta_data_mc_ratio.png`. Document the interpretation in `notes/feature_audit.md`.
 
 - **Measure K→π mis-ID in MC:** for each (p, theta) bin, compute `M^{K→π}` = fraction of true K+ tracks the Event Builder labels as π+. This is the kaon-recovery diagnostic: a large `M^{K→π}` means the EB-π+ sample contains a recoverable population of true kaons. Plot as a 2D map in (p, theta). Record results in `notes/kpi_contamination.md` and flag to Maria by end of week.
 - Read scikit-learn user guide §1.10 (decision trees) and §1.11 (ensemble methods). One page of notes per section in `/notes/sklearn_reading.md`.
@@ -206,7 +206,7 @@ Cooper must:
 **Risks / dependencies.**
 - ntuple statistics insufficient at high p. Severity M. Mitigation: scale up the file list early in the week; do not wait until Friday.
 - Column names in the ntuple don't match variable names used in prior notes or literature. Severity L. Mitigation: write a `feature_map.py` that translates once for all downstream code.
-- Data/MC feature disagreement affects many variables (Steps 2c/2d). Severity M. Mitigation: run the audit early in the week so flagged features are identified before any ML training begins. The combined three-metric drift decision (PSI, Wasserstein-norm, max local residual — detailed in Week 3 Task 3a) is robust to sample-size effects that make a KS-only threshold unreliable; a reduced feature set still yields a valid classifier.
+- Data/MC feature disagreement affects many variables (Steps 2c/2d). Severity M. Mitigation: run the audit early in the week so flagged features are identified before any ML training begins. A reduced feature set still yields a valid classifier.
 
 **Fallback / scope-down.** If the feature audit reveals broken features (e.g. FTOF time always zero), table the broken features and proceed with whichever subset is correct. Do not block on fixing the groovy script in Week 2; come back to it in Week 3 if needed.
 
@@ -220,54 +220,16 @@ Cooper must:
 
 **Task 3a — Finish the data/MC variable-agreement audit (carried over from Week 2).**
 
-This is the continuation of Steps 2c and 2d from Week 2. The goal is the same: establish, for every candidate ML training feature, whether MC and data distributions agree well enough to trust the feature in training, and produce KEEP / CANDIDATE / DROP decisions that gate which variables enter the ML pipeline.
+This is the continuation of Steps 2c and 2d from Week 2. The goal is to establish, for every candidate ML training feature, whether MC and data distributions agree well enough to trust the feature in training.
 
-*Procedure.* Run `scripts/compare_mc_data.py` over the variable groups defined in Week 2 (Group 1 kinematics, Group 2 ML features, Group 3 candidate features). The script compares MC (EB-K+ tracks) against data (EB-K+ tracks) independently in each of the 9 coarse (p, θ) cells (p in [1, 2], [2, 3], [3, 5] GeV × θ in [5°, 15°], [15°, 25°], [25°, 35°]). For each variable in each cell it computes three drift metrics, derives a per-cell `drift_decision`, generates the overlaid 1D distribution PNG, and writes all results to `figures/feature_audit/feature_audit_summary.csv`. Do not treat the script as a black box. Cooper must understand what each metric measures and be able to defend the decisions to Maria.
+*What the audit involves:* per-feature overlays of MC vs data 1D distributions in 9 coarse (p, θ) slices (p in [1, 2], [2, 3], [3, 5] GeV × θ in [5°, 15°], [15°, 25°], [25°, 35°]); KS-test flag per feature per slice (flag if KS distance > 0.05 or shapes disagree visually); KEEP / CANDIDATE / DROP decision per feature; and the 2D (p, θ) data/MC ratio map needed for the reweighting decision.
 
-The audit defaults to no event-level kinematic cuts because the trained classifier will see the uncut per-track sample at training time. KEEP/CANDIDATE/DROP decisions are made on the basis of the uncut comparison, since that comparison reflects what the classifier will actually encounter. A second audit pass with `--sidis-cuts` enabled is a useful diagnostic: variables that disagree in the uncut comparison but agree in the SIDIS regime have their disagreement driven by exclusive contamination in data, which is information worth recording but does not change the training-feature decision. Variables that disagree in both comparisons have a more fundamental MC mismodeling that the classifier will pick up.
-
-The audit is a batch operation, not interactive work. Run it from the project root using the species driver script:
-
-```bash
-# Primary audit (no event-level cuts; matches what the classifier sees at training):
-python scripts/audit_species.py \
-    --mc   /volatile/clas12/<user>/SULI/mc_pid_training_full.root \
-    --data /volatile/clas12/<user>/SULI/data_pid_training.root \
-    --species kp \
-    --vars all_audit kinematics \
-    --outdir figures/feature_audit/kp
-
-# Diagnostic SIDIS-cut audit (event-level Q² > 2, W > 2, y < 0.75, Mx_eKX > 1.6):
-python scripts/audit_species.py \
-    --mc   /volatile/clas12/<user>/SULI/mc_pid_training_full.root \
-    --data /volatile/clas12/<user>/SULI/data_pid_training.root \
-    --species kp \
-    --vars all_audit kinematics \
-    --sidis-cuts
-# (Output auto-suffixed to figures/feature_audit/kp_sidis/)
-```
-
-`audit_species.py` is the canonical entry point for the SULI workflow; the underlying engine (`compare_mc_data.py`) is a generic library that `audit_species.py` wraps with the project-specific species cut and truth-match logic. By default (`--truth-mode matched`), the audit covers EB-labeled K⁺ tracks that the MC truth match accepted — this is the correct sample for ML feature drift because the classifier operates on the EB-labeled population including its mis-IDs; the alternative truth modes (`pure`, `off`) are documented in `audit_species.py`'s module docstring for the rare cases where they apply. Cooper auditing other species later (π⁺ for the Δφ classifier, p for the proton channel) reruns the same script with `--species pip` or `--species p` — no new tooling required.
-
-This writes every per-cell PNG, populates the summary CSV, and prints the per-variable summary table to stdout. Iterating on a single variable while debugging is fast: replace `--vars all_audit kinematics` with `--vars beta` (or any single variable name) and re-run in seconds. Do **not** run the full audit inside a Jupyter notebook — the ~25-variable × 9-cell render budget plus the multi-million-row DataFrames pinned in the kernel make this fragile and slow. Use Jupyter only for *inspecting* outputs: load the CSV with pandas, look at flagged variables, open the relevant PNGs. For unattended runs on very large data samples, wrap the same CLI in a slurm submission (same pattern as Task 3b's MC processing).
-
-*What the three metrics measure.* The `wasserstein_normalized` metric is the Wasserstein-1 (earth-mover's) distance between the MC and data distributions, divided by the IQR of the combined sample. It measures how much probability mass you would need to move, in units of the variable's typical spread, to turn MC into data. Dividing by the IQR makes it scale-free: the same threshold applies to sharply-peaked beta and broad theta without any per-variable tuning. A value `< 0.05` means the distributions agree well; `≥ 0.20` means the disagreement is obvious by eye. The `psi_score` metric is the Population Stability Index, a standard feature-drift diagnostic used in credit-risk modeling. It uses quantile binning that auto-adapts to the variable's shape, so the thresholds are not arbitrary — they are the same tiers the industry has validated across a wide range of distributions: `< 0.10` is stable, `0.10–0.25` requires attention, `≥ 0.25` is a major shift. The `max_local_residual` metric is the maximum absolute quantile residual across all quantile bins — it catches localized disagreement that the integrated metrics average away. This is the PID-relevant failure mode: MC and data can agree in the bulk but disagree in a tail that drives mis-identification. A value `< 0.30` means no bin disagrees by more than 30%; `≥ 0.80` means the worst bin is wildly off. Each metric catches a failure mode the others miss. Using all three prevents a single number from hiding a real disagreement, which was the central weakness of any single-statistic threshold rule.
-
-For every variable that lands CANDIDATE or DROP on any metric, Cooper must open the per-cell PNGs and confirm the disagreement is real — not driven by a single empty bin, a sentinel value (-9999) he missed, or a binning artifact. The workflow is numbers-first-then-eyes, not numbers-only. Numerical metrics do not override visual inspection; they direct where to look.
-
-*Per-cell decision.* The `drift_decision` column in `feature_audit_summary.csv` gives the authoritative call for each (variable, p-bin, θ-bin) cell. It is computed automatically by `classify_drift(...)` using the rule: **DROP** if at least two metrics flag DROP; **CANDIDATE** if any one metric flags CANDIDATE or DROP; **KEEP** if all metrics flag KEEP. NaN metrics (e.g., a constant variable in a low-statistics cell) are skipped; a cell where every non-NaN metric is KEEP resolves to KEEP.
-
-*Per-variable aggregation.* After the per-cell decisions are in, aggregate to a single variable-level decision: the variable is **DROP** if any cell is DROP; **CANDIDATE** if no cell is DROP but at least one is CANDIDATE; **KEEP** if every cell is KEEP; **UNKNOWN** if every cell is UNKNOWN (too few entries to compute anything in any cell). The rationale is direct: an ML feature that fails in even one kinematic region leaks data/MC differences into classifier predictions in that region. The per-cell metric maxima that support the variable-level decision are recorded in `figures/feature_audit/feature_audit_summary.csv` (machine-readable) and written up in Section 5 of the Week 1-2 report (human-readable narrative).
-
-*KS and χ² legacy columns.* `ks_distance`, `ks_pvalue`, `chi2`, `chi2_per_ndof`, `chi2_pvalue`, `mean_rel_diff`, `max_abs_rel_diff`, and `ks_flag` are still written to `feature_audit_summary.csv` as sanity checks. At Cooper's sample sizes, KS p-values are essentially meaningless — any real sample will reject the null — so they are not decision drivers. However: if `drift_decision = KEEP` but the KS distance is large, that is a sign the new metrics missed something (or the quantile binning for the local-residual panel was misconfigured) — investigate before trusting the decision. If `drift_decision = DROP` but KS looks fine, trust the drift decision; KS is blind to localized tail disagreements and shape changes that don't shift the bulk.
-
-*Special handling for Group 1 kinematics.* `p`, `theta`, `phi`, `vz`, and `sector` are not ML training features, so their `drift_decision` does not gate inclusion. But the drift metrics on `p` and `theta` directly inform the Step 2d reweighting decision: if both are KEEP, no reweighting is likely needed; if either is CANDIDATE or DROP, the 2D (p, θ) ratio map will show structure and reweighting should be implemented in Week 4. Run the three-metric audit on Group 1 first, record the per-variable decisions, then proceed to the 2D ratio map (Step 2d, continuing below) with those decisions already in hand.
+*Tooling:* the `compare_mc_data.py` script (being written separately) handles the per-feature comparison mechanics — generating the overlaid histograms and computing the KS statistic. Cooper should **use** this script AND understand what each test does: what the KS statistic measures, what the null hypothesis is, and why KS distance > 0.05 is the threshold. Do not treat the script as a black box.
 
 *Outputs:*
-  - `figures/feature_audit/<var>/<var>_pXX-XX_thetaXX-XX.png` — per-cell overlays (auto-generated).
-  - `figures/feature_audit/feature_audit_summary.csv` — per-cell metrics including `drift_decision` (auto-generated). Cooper appends a `decision_notes` column after running the audit: one free-text entry per row capturing any visual-cross-check observation that overrides the auto-decision or that Maria should see (e.g. "disagreement driven by single empty bin," "tail bump matches a known FTOF artifact," "hit-fraction collapse below p=2 GeV"). Empty string when the auto-decision stands without commentary.
-  - `figures/feature_audit/README.md` — short operator note (≤ 20 lines): what's in the directory, what each CSV column means, pointer to the report section where the audit is written up. This is reference material for anyone walking up to the directory cold, not narrative.
-  - `figures/feature_audit/ptheta_data_mc_ratio.png` — 2D ratio map (path unchanged).
+  - `notes/feature_audit.md` — per-feature decision table (one row per variable, columns: feature name, hit-fraction MC, hit-fraction data, max KS distance across slices, decision, notes).
+  - `figures/feature_audit/` — one overlay plot per feature per (p, θ) slice, plus the 2D (p, θ) data/MC ratio map at `figures/feature_audit/ptheta_data_mc_ratio.png`.
+  - One-paragraph reweighting recommendation in `notes/feature_audit.md`: if the ratio map is roughly flat, no reweighting is needed; if it varies significantly, reweighting is warranted and will be implemented in Week 4.
 
 **Task 3b — Production-scale ntuples.**
 
@@ -288,8 +250,7 @@ The LaTeX template in `suli2026_pid/report/` still has placeholder text and TODO
 Concretely:
   - **Review every Overleaf comment Maria has left and resolve each one.** Either address the question or concern in the text, or reply to the comment with reasoning if you disagree. No comment should be left unacknowledged.
   - **Read the report end to end** — not just edit sections in isolation. Make sure the narrative flows: introduction → method → results → discussion.
-  - Fill in remaining placeholders: abstract, introduction prose, section 4 contamination discussion, summary section.
-  - **Section 5 — audit findings.** Write up the data/MC audit results based on `figures/feature_audit/feature_audit_summary.csv` and the `decision_notes` column Cooper added. The section must contain: (1) a typeset table of the variable-level KEEP/CANDIDATE/DROP decisions with the worst per-cell PSI, W/IQR, and max local residual for each variable; (2) per-variable prose for every CANDIDATE and DROP variable explaining what the disagreement looks like and what was visually confirmed; (3) the one-paragraph reweighting recommendation based on the (p, θ) ratio map — if the ratio map is roughly flat, no reweighting is needed; if it varies significantly across (p, θ) space, reweighting is warranted and will be implemented in Week 4. Use the per-cell PNGs as supporting figures where they sharpen the narrative — do not include all of them.
+  - Fill in remaining placeholders: abstract, introduction prose, section 4 contamination discussion, section 5 audit findings (once the audit from Task 3a is done), summary section.
   - Replace every TODO figure caption with a real caption describing what is actually shown (axes, units, color coding, key takeaway).
   - Copy produced PNGs into `report/figures/`.
   - Compile locally with `pdflatex` (or via Overleaf) and confirm the PDF builds without errors or unresolved references.
@@ -300,18 +261,18 @@ Concretely:
 - Read scikit-learn user guide §3.1 (cross-validation), §3.3 (metrics), §1.16 (calibration). One page of notes per section.
 
 **Maria's tasks.**
-- Review the feature audit results: `figures/feature_audit/feature_audit_summary.csv` (with `decision_notes` filled in) and Section 5 of the Week 1-2 report. Confirm the KEEP / CANDIDATE / DROP decisions. Decide whether the (p, θ) ratio map warrants reweighting in Week 4.
+- Review the completed feature audit (`notes/feature_audit.md`). Confirm the KEEP / CANDIDATE / DROP decisions. Decide whether the (p, θ) ratio map warrants reweighting in Week 4.
 - Approve the train/val/test split.
 - 1-hour meeting: walk through the baseline contamination plot. Decide whether the (p, theta) binning needs revision before Week 4.
 - Check in with Cooper on Python/ML progress. If reading is not getting done, adjust Week 4 expectations.
+- **Make decision on hyperon-tagged kaon-truth channel** (see Decision Points). This decision blocks Week 8 planning.
 - **Sign off on the Week 1-2 report draft** after all Overleaf comments are resolved and the PDF compiles clean.
 - If Cooper has not used slurm arrays before, help set up the submission script at the start of the week — do not let this block ntuple production past Tuesday.
 
 **Done when.**
-- `figures/feature_audit/feature_audit_summary.csv` present with `drift_decision` column populated for all variables and cells, and Cooper's `decision_notes` column filled in (empty strings allowed where the auto-decision stands without commentary).
-- `figures/feature_audit/` populated with per-variable per-cell overlay PNGs and `ptheta_data_mc_ratio.png`.
-- `figures/feature_audit/README.md` written (≤ 20 lines: directory contents, CSV column meanings, pointer to Section 5 of the Week 1-2 report).
-- Reweighting recommendation (one paragraph) written in Section 5 of the Week 1-2 report.
+- `notes/feature_audit.md` complete with per-feature KEEP / CANDIDATE / DROP decision table.
+- `figures/feature_audit/` populated with per-feature overlay plots and `ptheta_data_mc_ratio.png`.
+- Reweighting recommendation (one paragraph) written in `notes/feature_audit.md`.
 - MC ntuple from full RICH-on `clasdis` sample exists on `/volatile/clas12/<username>/SULI/`; event count and output size documented.
 - Data ntuple from ≥ 10 Fa18 inbending HIPO files exists on `/volatile/clas12/<username>/SULI/`; file count and event count documented.
 - Slurm submission script committed to `suli2026_pid/slurm/`.
@@ -324,7 +285,7 @@ Concretely:
 - **Full-sample MC production takes longer than expected.** The RICH-on `clasdis` sample is ~318 files at roughly 10 min each — approximately 50 CPU-hours total. This must be parallelized via a slurm array; a single interactive run is not feasible. Mitigation: submit the array early Monday. Maria helps set up the submission script if Cooper has not used slurm arrays before. If the queue is slow, run a 10-job test array first to validate the script, then submit the full array.
 - **Data sample is not cached or access is slow.** Files in `/cache/` may need to be staged from tape. Severity M. Mitigation: check file availability with `ls -lh` on the target directory at the start of the week; if files need staging, submit the staging request immediately and work on the audit and report while waiting.
 - slurm jobs fail or queue indefinitely. Severity M. Mitigation: run a small test array (5–10 jobs) before submitting the full batch. Check output logs before assuming all jobs completed.
-- **Three drift metrics give conflicting signals on edge-case variables.** Severity L. This is expected on variables near the CANDIDATE/DROP boundary — one metric flags DROP while the two others say KEEP. The combined `drift_decision` rule handles the common cases, but edge cases require visual cross-check of the per-cell PNGs to determine whether the flagging metric is responding to a real shape difference or a low-statistics artifact. Visual inspection resolves the ambiguity; do not resolve it by ignoring the metric.
+- Truth-matching efficiency on `clasdis` not what Connor reports (he used |Δφ| < 6°, |Δθ| < 2°). Severity L. Mitigation: log the match efficiency as a sanity number.
 - Report polish takes longer than expected if many Overleaf comments require substantive revisions. Severity M. Mitigation: address comments in priority order — physics content first, prose last. A clean compile with all comments resolved is the minimum bar.
 
 **Fallback / scope-down.** If full-sample MC processing does not complete by Friday, proceed to Week 4 with whatever is on disk and re-run the remainder in the background. Do not block Week 4 on ntuple completion. If the report draft is not signed off by Friday, carry the final PI sign-off into the first day of Week 4.
@@ -334,10 +295,6 @@ Concretely:
 ### Week 4 — First model: BDT (LightGBM); comparison protocol; probability calibration
 
 **Theme.** Train a gradient-boosted decision tree on the detector features. Compare to baseline on the test set. Establish the comparison protocol. Calibrate probabilities.
-
-*Training-feature set and cut conventions.* The classifier is trained on per-track detector features only — possibly β, FTOF 1A/1B energy/time/path, ECAL inner/outer energy/time/path, augmented with chi2pid as a 14th feature pending audit, plus any of the candidate features (PCAL, FTOF layer 2) that survive the data/MC audit. Kinematic variables (p, θ, φ, vz, sector) are not training features — instead, MC is reweighted to data via a 15×15 (p, θ) sample-weight map applied to the classifier fit. This is to avoid the classifier learning the underlying (p, θ) distribution of kaons from the event generator.
-
-Per-track quality cuts apply at training time: EB pid match, MC truth match, FD-only, vz cut, fiducial cuts. Event-level SIDIS cuts (Q², W, y, missing mass) are NOT applied at training time. The classifier learns per-track detector responses across the broadest realistic per-track kinematic phase space. SIDIS cuts are applied downstream during the analysis-channel evaluation (Week 5+) and during the data/MC audit's diagnostic runs (Week 3 Task 3a). The audit's KEEP/CANDIDATE/DROP decisions are made on uncut comparisons because that comparison reflects what the classifier will actually encounter; SIDIS-cut audits are diagnostic only.
 
 **Cooper's tasks.**
 - Install LightGBM (`conda install -c conda-forge lightgbm`). Train a first BDT: `lgb.LGBMClassifier(n_estimators=200, learning_rate=0.05, max_depth=6, random_state=42)`. Fit on the train set. Predict probabilities on the test set. LightGBM handles missing values (-9999 or NaN) natively — no imputation needed for the first pass.
@@ -369,32 +326,50 @@ Per-track quality cuts apply at training time: EB pid match, MC truth match, FD-
 
 ---
 
-### Week 5 — Per-bin BDT threshold optimization; apply to SIDIS channel; first headline number
+### Week 5 — Diagnose Week-4 low-p underperformance, lock a feature tier, then per-bin optimize and apply to the analysis channel
 
-**Theme.** Complete per-bin threshold optimization. Apply the BDT to the analysis-channel ntuple. Quote the first headline improvement number.
+**Theme.** Investigate first, optimize and apply second. Week 4 produced a working end-to-end BDT pipeline but on a minimal four-feature tier (`beta`, `ftof_energy_1B`, `ftof_time_1B`, `ftof_path_1B`; no `chi2pid`, no ECAL, no FTOF panel 1A), and the per-bin results show surprisingly poor performance at low momentum — exactly the regime where K/π separation should be easiest. Applying that model to the analysis channel before understanding the low-p behavior would propagate the problem into the headline number. Week 5 therefore splits cleanly in two: the first half tests whether the low-p underperformance is feature-set-fixable and commits to a tier; the second half runs per-bin threshold optimization and the first analysis-channel application on that locked tier.
 
-**Cooper's tasks.**
-- Implement per-(p, theta)-bin threshold optimization using FOM = `N_K / sqrt(N_K + N_pi)`. Sweep BDT score threshold 0 to 0.95 per bin; pick the maximum. Use the validation set for threshold selection — do NOT use the test set. Tabulate the thresholds for each bin.
-- Apply the optimized BDT to the **analysis-channel ntuple** for `ep → e' p K+ X`. For each event, run the BDT on the K+ candidate, accept the event if BDT score > the bin-optimal threshold. Compare to the baseline-cut accepted event count and pion-truth contamination.
-- Produce the first headline number: "for the `ep → e' p K+ X` MC sample, at fixed kaon efficiency `eps_0`, baseline gives contamination `C_baseline = X%`, BDT gives `C_BDT = Y%`, improvement = `(X-Y)/X = Z%`."
-- Plot M_X(e' p K+) distributions for {all events, baseline-cut events, BDT-cut events}, color-coded by truth class. This shows visually how the cut cleans up the missing-mass spectrum.
-- Write a 1-page section of the eventual report: "MC-truth comparison of BDT to EB+chi2pid baseline on the `ep → e' p K+ X` channel." This is a writeup deposit, not the final report.
+The `week4-tier-flexible` branch decouples dataset schema from training features — the dataset is built once with the maximal feature set and the training selects a subset via `--features-file`. Three tier files are seeded as starting points: **tier 1** (the current four features), **tier 2** (tier 1 + `chi2pid` + FTOF 1A panel), and **tier 3** (tier 2 + ECAL `ecin_*` / `ecout_*` + `nphe_htcc`). These are not gospel; Maria and Cooper may revise tier composition as the comparison comes in.
+
+**Cooper's tasks — first half (Tue–Wed): investigate and commit to a tier.**
+- Run tier-2 and tier-3 trainings on the existing dataset (no rebuild needed; that is the whole point of the new branch). Hold all other hyperparameters fixed to the Week-4 configuration so the comparison is clean. Save model artifacts under `/work/clas12/$USER/SULI/` in a layout that makes "which tier produced this model" unambiguous.
+- Build a side-by-side comparison: per-bin AUC, per-bin C^π→K, and the feature importance ranking for tier 1 vs tier 2 vs tier 3. The central question is whether adding `chi2pid` (tier 2) closes the low-p gap. If it does, that is the answer and the diagnosis is short. If it does not, the problem is structural and the second set of tasks below applies.
+- If `chi2pid` does not fix low-p, diagnose per-bin: (a) plot per-bin event counts and class balance `n_K / n_π` — low-p EB-K+ samples are kaon-dominated and may be statistics-starved on the negative class; (b) plot per-bin score distributions colored by truth and judge whether the BDT separates the classes cleanly at low p or whether the score itself is confused; (c) re-examine `evaluate.py`'s `n<50` low-stat policy and bin-edge handling at low p, and confirm the training-vs-evaluation class-balance assumption (if they differ, the threshold sweep can produce misleading per-bin numbers without reweighting); (d) note that the Week-4 Platt calibration was a near no-op (pre/post AUC identical), so a residual kinematic bias in the raw scores would not have been absorbed.
+- Commit to a tier for the rest of the project. Write the choice and its justification into `notes/cooper_week5_decisions.md` (one paragraph minimum), with the tier-comparison plots and the diagnosis as evidence. This is the deliverable Maria signs off on at mid-week before any per-bin optimization runs.
+
+**Cooper's tasks — second half (Wed–Fri): per-bin optimization and analysis-channel application on the locked tier.**
+- Per-(p, theta)-bin threshold optimization on the chosen tier using FOM = `N_K / sqrt(N_K + N_pi)`. Sweep BDT score threshold 0 to 0.95 per bin; pick the maximum. Use the validation set for threshold selection — never the test set. Tabulate the thresholds.
+- Apply the optimized BDT to the analysis-channel ntuple (`ep → e' p K+ X`, from `processing_mc_three_particles.groovy`). For each event run the BDT on the K+ candidate and accept if the score exceeds the bin-optimal threshold. Compare accepted-event count and pion-truth contamination to the EB+chi2pid baseline. This stays on MC. Data application is **Week 8** (exclusive missing-mass method); do not promote it here.
+- Quote the first headline number on the chosen tier, not on tier 1: "for the `ep → e' p K+ X` MC sample, at fixed kaon efficiency `eps_0`, baseline gives contamination `C_baseline = X%`, BDT gives `C_BDT = Y%`, improvement = `(X-Y)/X = Z%`." If low-p remains problematic and the tier choice does not fix it, quote the number with an honest per-bin breakdown rather than burying the issue in a single average.
+- Plot M_X(e' p K+) distributions for {all events, baseline-cut events, BDT-cut events}, color-coded by truth class.
+- Write a 1-page section of the eventual report: "MC-truth comparison of BDT to EB+chi2pid baseline on the `ep → e' p K+ X` channel," covering both the tier choice and the headline number. Writeup deposit, not the final report.
 
 **Maria's tasks.**
-- Review the headline number. Sanity-check against intuition: does the improvement scale with momentum the way you'd expect?
-- **Mid-project review with Cooper.** 1 hour. Are we on track? Is the scope right? Adjust Week 6-10 ambition.
+- Mid-week meeting now focuses on the tier comparison and the low-p diagnosis, not the headline number. Sign off on the tier choice first; the per-bin optimization run depends on it.
+- Sit with Cooper through the tier comparison if needed — this is the first time the project has had to read a per-tier ablation and decide on a feature set under time pressure.
+- Sign-off comes in two stages: (a) the tier choice, mid-week; (b) the headline number, end of week. Do not collapse them.
+- **Mid-project review.** 1 hour. Are we on track? Is the scope right? Adjust Week 6–10 ambition. This conversation also absorbs whatever the low-p investigation concluded.
 
-**Done when.**
-- Per-bin BDT thresholds in a CSV.
-- Headline improvement number quoted, with statistical uncertainty.
+**Done when — first half.**
+- Tier-2 and tier-3 trainings completed, model artifacts saved reproducibly on `/work/clas12/$USER/SULI/`.
+- Side-by-side comparison table of tier 1 vs tier 2 vs tier 3 (per-bin AUC, per-bin C^π→K, feature importance).
+- Written diagnosis (one paragraph minimum) of why low-p was poor in tier 1 and whether the higher tiers fix it.
+- Locked tier choice for the rest of the project with brief rationale, in `notes/cooper_week5_decisions.md`.
+
+**Done when — second half.**
+- Per-bin BDT thresholds (on the locked tier) in a CSV.
+- Headline improvement number quoted on the locked tier, with statistical uncertainty and a per-bin breakdown.
 - M_X(e' p K+) plot in `/figures/`.
 - Mid-project writeup section in `/report/section_bdt_truth.md`.
 
 **Risks / dependencies.**
-- The improvement is small or negative. Severity M. Mitigation: if BDT doesn't beat baseline, that is information. The channel context (SIDIS, different kinematic distribution) means results may differ from prior work. Document honestly. Then diagnose: are the features informative? Is the reweighting correct?
+- Low-p underperformance is structural rather than feature-set-fixable (class imbalance, training-vs-evaluation class-balance mismatch, evaluation-code artifact at low stats, or a real kinematic bias the calibration cannot absorb). Severity M–H. Mitigation: if tier 3 does not close the gap either, Maria decides whether to scope the collaboration-meeting result down to mid/high-p only, with the low-p caveat documented honestly rather than hidden.
+- Tier-comparison results are inconclusive — e.g. tier 2 partially improves low-p but with mixed signals on mid-p, or feature importance flips between tiers in ways that don't suggest a clean choice. Severity M. Mitigation: ship tier 2 (the obvious physics-motivated middle option) rather than spending the rest of the week chasing the cleanest possible ablation.
 - Per-bin optimization overfits because some bins have low MC statistics. Severity M. Mitigation: use the validation set for threshold selection, not the test set. Apply on the test set only once.
+- (p, theta) reweighting (originally Week 4) is now punted again — neither the tier comparison nor the headline number in Week 5 will be reweighted. Severity L–M. Mitigation: this is a tracked debt; pick it up in Week 6 or note it explicitly in the writeup so it doesn't get lost.
 
-**Fallback / scope-down.** If per-bin optimization is taking more than 2 days, use a single global threshold from the validation set. The improvement number changes but the pipeline still works.
+**Fallback / scope-down.** If the tier comparison does not resolve the low-p question by end-of-day Wednesday, ship the tier-2 model with honest per-bin numbers and a documented caveat about low-p, and run the second-half tasks on that. Do not spend Thursday and Friday chasing a structural issue at the expense of the analysis-channel application and the mid-project writeup; the chase, if needed, fits better in Week 6 once there is a deliverable in hand.
 
 ---
 
@@ -591,7 +566,7 @@ Do not drop: the headline improvement number, the report, the poster. These are 
 
 - **FD-only.** All training and evaluation done with `status` in [2000, 4000). Verified by `generic_tests.forward_detector_cut`. CD tracks excluded from this entire project.
 - **chi2pid as feature, not cut.** The training script does NOT cut on chi2pid. The baseline DOES apply the pass-2 momentum-dependent chi2pid cut (`passes_kplus_chi2pid_cut` in `scripts/baseline_chi2pid.py`); the older loose form `|chi2pid| < 3` is not the production baseline. The ML uses chi2pid as one input feature among many. This is the central methodological point: we are using ML to learn a better cut than the standard one, not to replace chi2pid.
-- **MC truth matching.** Geometric: `|delta phi| < 6°, |delta theta| < 2°`. Tracks with no MC match within this window are dropped from the training set (they cannot have a truth label).
+- **MC truth matching.** Geometric: `|delta phi| < 6°, |delta theta| < 2°`. Same as Connor. Tracks with no MC match within this window are dropped from the training set (they cannot have a truth label).
 - **Energy-loss and momentum corrections.** Applied at the groovy level via `analysis_fitter` infrastructure for electrons; not applied for K+ (Hayward's code has no kaon corrections; this is a known limitation common to cut-based and ML approaches equally).
 - **Reproducibility.** All sklearn fits with `random_state=42`. All split file lists committed to repo. All slurm submission scripts committed. README must explain how to go from clean checkout to trained model in one command.
 - **Honesty.** If a measurement disagrees with another, say so. The missing-mass method and MC-truth are independent by construction: if they disagree, that is part of the result, not a problem to paper over.
