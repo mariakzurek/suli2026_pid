@@ -57,7 +57,7 @@ Usage:
       --theta-edges 5 15 25 35 \\
       --overwrite
 """
-
+from matplotlib.backends.backend_pdf import PdfPages
 import argparse
 import pathlib
 
@@ -73,6 +73,8 @@ import json
 
 import sys
 from pathlib import Path
+
+allPlots=[]
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
@@ -248,6 +250,7 @@ def _heatmap(
     vmin: float,
     vmax: float,
     title: str,
+    thresholds=None,
     cbar_ax=None,
     fig=None,
 ) -> None:
@@ -304,26 +307,20 @@ def _heatmap(
                     linewidth=0.5,
                 ))
             else:
-                if score_map is not None:
-                    ax.text(
+                if thresholds is not None and not np.isnan(thresholds[pi, ti]):
+                    text = f"{data[pi, ti]:.2f} | {thresholds[pi, ti]:.2f}"
+                else:
+                    text = f"{data[pi, ti]:.2f}"
+
+                ax.text(
                     ti + 0.5,
                     pi + 0.5,
-                    f"Cπ={data[pi, ti]:.2f}\nBDT={score_map[pi, ti]:.2f}",
+                    text,
                     ha="center",
                     va="center",
                     fontsize=6,
                     color="white",
-                    )
-                else:
-                    ax.text(
-                    ti + 0.5,
-                    pi + 0.5,
-                    f"{data[pi, ti]:.2f}",
-                    ha="center",
-                    va="center",
-                    fontsize=7,
-                    color="white",
-                    )
+                )
 
     # Axis labels: theta on x, p on y.
     ax.set_xticks(np.arange(n_t) + 0.5)
@@ -344,6 +341,499 @@ def _heatmap(
         fig.colorbar(im, cax=cbar_ax)
 
 
+def plot_ml_contamination_simple(matched,
+                                 pStart, pEnd, pStep,
+                                 direct,
+                                 bdt_cut):
+    import numpy as np
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots()
+
+    # fixed theta bins: 5 bins from 5 to 35 degrees
+    t_edges = np.linspace(5, 35, 6)
+
+    colors = ["black", "tab:blue", "tab:orange", "tab:green", "tab:red"]
+
+    n_p_bins = int((pEnd - pStart) / pStep)
+
+    for i in range(5):
+
+        theta_lo = t_edges[i]
+        theta_hi = t_edges[i + 1]
+
+        vals = []
+        errs = []
+
+        p = pStart
+
+        for j in range(n_p_bins):
+
+            pCut = matched[
+                (matched["p"] >= p) &
+                (matched["p"] < p + pStep) &
+                (matched["theta"] >= theta_lo) &
+                (matched["theta"] < theta_hi) &
+                (matched["score"] > bdt_cut)
+            ]
+
+            a = ((pCut["mc_matching_pid"] != 321) &
+                 (pCut["pid"] == 321)).sum()
+
+            b = (pCut["pid"] == 321).sum()
+
+            if b != 0:
+                r = a / b
+            else:
+                r = 0
+
+            if a != 0 and b != 0:
+                rErr = r * np.sqrt((1/a) + (1/b))
+            else:
+                rErr = 0
+
+            vals.append(r)
+            errs.append(rErr)
+
+            p += pStep
+
+        edges = np.linspace(pStart, pEnd, len(vals) + 1)
+        x = (edges[:-1] + edges[1:]) / 2
+
+        mask = np.array(vals) != 0
+
+        ax.errorbar(
+            x[mask],
+            np.array(vals)[mask],
+            yerr=np.array(errs)[mask],
+            fmt='o',
+            capsize=3,
+            color=colors[i],
+            label=f"{theta_lo:.0f}–{theta_hi:.0f}°"
+        )
+
+    ax.set_ylim(0, 1.1)
+    ax.set_xlabel("Momentum (GeV/c)")
+    ax.set_ylabel("Contamination")
+    ax.set_title("ML-based K⁺ contamination vs momentum")
+
+    ax.plot([], [], ' ', label=f"BDT cut = {bdt_cut:.3f}")
+    ax.legend()
+
+    fig.tight_layout()
+    fig.savefig(direct + "contaminationK_ML.png", dpi=150)
+    plt.close(fig)
+    allPlots.append(fig)
+    return fig
+
+
+def plot_ml_contamination_fixed_efficiency_theta(
+    matched,
+    pStart, pEnd, pStep,
+    target_eff=0.8,
+    direct="."
+):
+    import numpy as np
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots()
+
+    # fixed theta bins: 5 bins from 5–35°
+    t_edges = np.linspace(5, 35, 6)
+    colors = ["black", "tab:blue", "tab:orange", "tab:green", "tab:red"]
+
+    n_p_bins = int((pEnd - pStart) / pStep)
+
+    for i in range(5):
+
+        theta_lo = t_edges[i]
+        theta_hi = t_edges[i + 1]
+
+        vals = []
+        errs = []
+
+        for j in range(n_p_bins):
+
+            p_lo = pStart + j * pStep
+            p_hi = p_lo + pStep
+
+            df_bin = matched[
+                (matched["p"] >= p_lo) &
+                (matched["p"] < p_hi) &
+                (matched["theta"] >= theta_lo) &
+                (matched["theta"] < theta_hi)
+            ]
+
+            if len(df_bin) == 0:
+                vals.append(0)
+                errs.append(0)
+                continue
+
+            # --- FIXED EFFICIENCY CUT ---
+            k_scores = df_bin.loc[df_bin["label"] == 1, "score"]
+
+            if len(k_scores) == 0:
+                vals.append(0)
+                errs.append(0)
+                continue
+
+            # threshold that gives desired efficiency
+            t_cut = np.quantile(k_scores, 1 - target_eff)
+
+            accepted = df_bin["score"] > t_cut
+
+            # contamination: NOT true K in accepted K sample
+            a = ((accepted) &
+                 (df_bin["pid"] == 321) &
+                 (df_bin["mc_matching_pid"] != 321)).sum()
+
+            b = ((accepted) &
+                 (df_bin["pid"] == 321)).sum()
+
+            if b > 0:
+                r = a / b
+                rErr = r * np.sqrt((1/a if a > 0 else 0) + (1/b))
+            else:
+                r = 0
+                rErr = 0
+
+            vals.append(r)
+            errs.append(rErr)
+
+        # --- plotting ---
+        edges = np.linspace(pStart, pEnd, len(vals) + 1)
+        x = (edges[:-1] + edges[1:]) / 2
+
+        mask = np.array(vals) != 0
+
+        ax.errorbar(
+            x[mask],
+            np.array(vals)[mask],
+            yerr=np.array(errs)[mask],
+            fmt="o",
+            capsize=3,
+            color=colors[i],
+            label=f"{theta_lo:.0f}–{theta_hi:.0f}°"
+        )
+
+    ax.set_ylim(0, 1.1)
+    ax.set_xlabel("Momentum (GeV/c)")
+    ax.set_ylabel(f"Contamination")
+    ax.set_title("ML contamination at fixed K⁺ efficiency")
+
+    ax.plot([], [], " ", label=f"efficiency = {target_eff:.2f}")
+    ax.legend()
+
+    fig.tight_layout()
+    fig.savefig(f"{direct}/contamination_fixed_eff_theta.png", dpi=150)
+    plt.close(fig)
+    allPlots.append(fig)
+    return fig
+
+def plot_ml_contamination_matched_theta(
+    df,
+    comp_df,
+    p_edges,
+    theta_edges,
+    direct="."
+):
+    import numpy as np
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots()
+
+    colors = ["black", "tab:blue", "tab:orange", "tab:green", "tab:red"]
+
+    # fixed theta bins (must match evaluate.py)
+    n_theta = len(theta_edges) - 1
+    n_p = len(p_edges) - 1
+
+    for ti in range(n_theta):
+
+        theta_lo = theta_edges[ti]
+        theta_hi = theta_edges[ti + 1]
+
+        vals = []
+        errs = []
+
+        for pi in range(n_p):
+
+            p_lo = p_edges[pi]
+            p_hi = p_edges[pi + 1]
+
+            # get matching threshold from evaluate.py output
+            row = comp_df[
+                (comp_df["p_lo"] == p_lo) &
+                (comp_df["p_hi"] == p_hi) &
+                (comp_df["theta_lo"] == theta_lo) &
+                (comp_df["theta_hi"] == theta_hi)
+            ]
+
+            if len(row) == 0 or np.isnan(row["threshold_matched_eff"].values[0]):
+                vals.append(np.nan)
+                errs.append(np.nan)
+                continue
+
+            t_cut = row["threshold_matched_eff"].values[0]
+
+            df_bin = df[
+                (df["p"] >= p_lo) & (df["p"] < p_hi) &
+                (df["theta"] >= theta_lo) & (df["theta"] < theta_hi)
+            ]
+
+            if len(df_bin) == 0:
+                vals.append(np.nan)
+                errs.append(np.nan)
+                continue
+
+            accepted = df_bin["score"] > t_cut
+
+            N_acc = accepted.sum()
+            if N_acc == 0:
+                vals.append(np.nan)
+                errs.append(np.nan)
+                continue
+
+            N_bad = (accepted & (df_bin["mc_matching_pid"] != 321)).sum()
+
+            r = N_bad / N_acc
+            rErr = np.sqrt(r * (1 - r) / N_acc)
+
+            vals.append(r)
+            errs.append(rErr)
+
+        # plot per theta bin
+        x = np.arange(len(vals)) + 0.5
+
+        vals = np.array(vals)
+        errs = np.array(errs)
+
+        mask = ~np.isnan(vals)
+
+        ax.errorbar(
+            x[mask],
+            vals[mask],
+            yerr=errs[mask],
+            fmt="o",
+            capsize=3,
+            color=colors[ti % len(colors)],
+            label=f"{theta_lo:.0f}–{theta_hi:.0f}°"
+        )
+
+    ax.set_xlabel("p bin index")
+    ax.set_ylabel("Contamination")
+    ax.set_title("ML contamination (matched-eff thresholds from heatmap)")
+    ax.set_ylim(0, 1.1)
+    ax.legend()
+
+    fig.tight_layout()
+    fig.savefig(f"{direct}/contamination_1d_matched_consistent.png", dpi=150)
+    plt.close(fig)
+
+    return fig
+
+def plot_ml_contamination_matched_chi2pid_theta(
+    df,
+    pStart, pEnd, pStep,
+    theta_edges=None,
+    threshold=0.5,
+    direct="."
+):
+    import numpy as np
+    import matplotlib.pyplot as plt
+    import pandas as pd
+
+    if theta_edges is None:
+        theta_edges = np.linspace(5, 35, 6)
+
+    fig, ax = plt.subplots()
+
+    colors = ["black", "tab:blue", "tab:orange", "tab:green", "tab:red"]
+
+    n_p_bins = int((pEnd - pStart) / pStep)
+
+    for i in range(len(theta_edges) - 1):
+
+        theta_lo = theta_edges[i]
+        theta_hi = theta_edges[i + 1]
+
+        vals = []
+        errs = []
+
+        for j in range(n_p_bins):
+
+            p_lo = pStart + j * pStep
+            p_hi = p_lo + pStep
+
+            df_bin = df[
+                (df["p"] >= p_lo) &
+                (df["p"] < p_hi) &
+                (df["theta"] >= theta_lo) &
+                (df["theta"] < theta_hi)
+            ]
+
+            if len(df_bin) == 0:
+                vals.append(np.nan)
+                errs.append(np.nan)
+                continue
+
+            # ================================
+            # SAME DEFINITION AS HEATMAP
+            # ================================
+
+            score = df_bin["score"].to_numpy()
+
+            label = df_bin["label"]
+            label_notna = pd.notna(label)
+            label_vals = np.where(label_notna, label.astype(float), np.nan)
+
+            accepted = score > threshold
+
+            # K efficiency denominator
+            n_K = np.sum(label_vals == 1)
+
+            # contamination denominator (ONLY labeled accepted)
+            n_acc_lab = np.sum(accepted & label_notna.to_numpy())
+
+            if n_K == 0 or n_acc_lab == 0:
+                vals.append(np.nan)
+                errs.append(np.nan)
+                continue
+
+            # contamination numerator: mis-ID K sample (label==0)
+            n_wrong = np.sum(accepted & (label_vals == 0))
+
+            r = n_wrong / n_acc_lab
+
+            # binomial-style uncertainty (same as your eval style)
+            rErr = np.sqrt(r * (1 - r) / n_acc_lab)
+
+            vals.append(r)
+            errs.append(rErr)
+
+        # plotting
+        edges = np.linspace(pStart, pEnd, len(vals) + 1)
+        x = (edges[:-1] + edges[1:]) / 2
+
+        vals = np.array(vals)
+        errs = np.array(errs)
+
+        mask = ~np.isnan(vals)
+
+        ax.errorbar(
+            x[mask],
+            vals[mask],
+            yerr=errs[mask],
+            fmt="o",
+            capsize=3,
+            color=colors[i % len(colors)],
+            label=f"{theta_lo:.0f}–{theta_hi:.0f}°"
+        )
+
+    ax.set_ylim(0, 1.1)
+    ax.set_xlabel("Momentum (GeV/c)")
+    ax.set_ylabel("π → K Contamination")
+    ax.set_title("ML contamination vs momentum (Chi2Pid Matched Efficiency)")
+
+    ax.plot([], [], " ", label=f"BDT cut = {threshold:.3f}")
+    ax.legend()
+
+    fig.tight_layout()
+    outpath = f"{direct}/contamination_matched_chi2pid_theta.png"
+    fig.savefig(outpath, dpi=150)
+    plt.close(fig)
+
+    return fig
+
+###### PURITY #########
+
+
+
+
+
+
+
+###### Efficiency #########
+
+
+
+
+
+
+###### Mis-ID ##########
+
+
+
+def plot_efficiency_vs_contamination_theta(sweep_csv, outdir):
+    import pandas as pd
+    import numpy as np
+    import matplotlib.pyplot as plt
+
+    df = pd.read_csv(sweep_csv)
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+
+    colors = [
+        "black",
+        "tab:blue",
+        "tab:orange",
+        "tab:green",
+        "tab:red"
+    ]
+
+    # unique theta bins
+    theta_bins = (
+        df[["theta_lo", "theta_hi"]]
+        .drop_duplicates()
+        .sort_values("theta_lo")
+        .to_numpy()
+    )
+
+    for i, (theta_lo, theta_hi) in enumerate(theta_bins):
+
+        theta_df = df[
+            (df["theta_lo"] == theta_lo) &
+            (df["theta_hi"] == theta_hi)
+        ]
+
+        # average over all momentum bins at each threshold
+        grouped = (
+            theta_df
+            .groupby("threshold")
+            .agg({
+                "eff_K": "mean",
+                "C_pi": "mean"
+            })
+            .reset_index()
+            .sort_values("eff_K")
+        )
+
+        ax.plot(
+            grouped["eff_K"],
+            grouped["C_pi"],
+            lw=2,
+            color=colors[i % len(colors)],
+            label=f"{theta_lo:.0f}–{theta_hi:.0f}°"
+        )
+
+    ax.set_xlabel("K⁺ Efficiency")
+    ax.set_ylabel("π → K Contamination")
+    ax.set_title("Efficiency vs Contamination by θ Bin")
+
+    ax.set_xlim(0, 1)
+    ax.set_ylim(bottom=0)
+
+    ax.grid(True, alpha=0.3)
+    ax.legend()
+
+    fig.tight_layout()
+
+    outfile = f"{outdir}/efficiency_vs_contamination_theta.png"
+    fig.savefig(outfile, dpi=150)
+
+    plt.close(fig)
+    allPlots.append(fig)
+    print(f"Saved: {outfile}")
 # ──────────────────────────────────────────────────────────────────────────────
 # Public API
 # ──────────────────────────────────────────────────────────────────────────────
@@ -434,7 +924,11 @@ def evaluate_model(
     bdt_cpi_matched     = np.full((n_p, n_t), np.nan)
     baseline_cpi_arr    = np.full((n_p, n_t), np.nan)
     bdt_cp_matched      = np.full((n_p, n_t), np.nan)
-    mask_lowstat        = np.ones((n_p, n_t), dtype=bool)   # True = low-stat
+
+# matched-efficiency BDT threshold
+    bdt_thresholds      = np.full((n_p, n_t), np.nan)
+
+    mask_lowstat        = np.ones((n_p, n_t), dtype=bool)
 
     for pi, (p_lo, p_hi) in enumerate(zip(p_edges[:-1], p_edges[1:])):
         for ti, (t_lo, t_hi) in enumerate(zip(theta_edges[:-1], theta_edges[1:])):
@@ -503,6 +997,8 @@ def evaluate_model(
                 bdt_cpi_matched[pi, ti] = bdt_cpi_at_matched_eff
                 baseline_cpi_arr[pi, ti] = bl["baseline_C_pi"]
                 bdt_cp_matched[pi, ti] = bdt_cp_at_matched_eff
+                bdt_thresholds[pi, ti] = t_matched_eff
+                #bdt_eff_matched[pi, ti] = bl["baseline_eff_K"]
 
             print(
                 f"  bin p=[{p_lo:.1f},{p_hi:.1f}) θ=[{t_lo:.0f},{t_hi:.0f}): "
@@ -519,6 +1015,10 @@ def evaluate_model(
     sweep_df = pd.DataFrame(sweep_rows)
     sweep_df.to_csv(str(sweep_csv_path), index=False)
     print(f"  per_bin_sweep.csv → {sweep_csv_path}")
+    plot_efficiency_vs_contamination_theta(
+        sweep_csv_path,
+        outdir
+    )
 
     comp_df = pd.DataFrame(comparison_rows)
     comp_csv_path = outdir / "comparison_summary.csv"
@@ -552,6 +1052,7 @@ def evaluate_model(
         p_edges, theta_edges,
         vmin=0.0, vmax=vmax,
         title="BDT (calibrated)\nC_π→K at matched eff_K",
+        thresholds=bdt_thresholds,
         cbar_ax=None, fig=None,
     )
 
@@ -594,6 +1095,32 @@ def evaluate_model(
     fig2.savefig(str(cp_map_path), dpi=150, bbox_inches="tight")
     plt.close(fig2)
     print(f"  cp_to_K_map.png → {cp_map_path}")
+
+    plot_bdt_1d(df, outdir / "bdt_score_1d_full.png")
+    plot_ml_contamination_simple(
+        matched=df,
+        pStart=0.5,
+        pEnd=3.2,
+        pStep=0.27,
+        #bins=10,
+        direct=str(outdir) + "/",
+        bdt_cut=t_matched_eff
+    )
+    plot_ml_contamination_fixed_efficiency_theta(
+        matched=df,
+        pStart=0.5,
+        pEnd=3.2,
+        pStep=0.27,
+        target_eff=0.8,
+        direct=str(outdir)
+    )
+    plot_ml_contamination_matched_chi2pid_theta(
+        df,
+        0.5, 3.2, 0.27,
+        direct=str(outdir)
+    )
+
+    
 
     # ── README ─────────────────────────────────────────────────────────────────
     readme = "\n".join([
@@ -683,6 +1210,42 @@ def _parse_args(argv=None):
     )
     return p.parse_args(argv)
 
+def plot_bdt_1d(df, outpath):
+    import matplotlib.pyplot as plt
+    import numpy as np
+    import pandas as pd
+
+    score = df["score"].to_numpy()
+
+    label = df["label"]
+    mcp = df["mc_matching_pid"].to_numpy()
+
+    label_notna = pd.notna(label)
+    label_vals = np.where(label_notna, label.astype(float), np.nan)
+
+    scores_K = score[label_vals == 1]
+    scores_pi = score[label_vals == 0]
+    scores_p = score[mcp == 2212]
+
+    bins = np.linspace(0, 1, 80)
+
+    plt.figure(figsize=(8, 5))
+
+    plt.hist(scores_K, bins=bins, density=True, alpha=0.6, label="K⁺ (signal)", color="green")
+    plt.hist(scores_pi, bins=bins, density=True, alpha=0.6, label="π⁺ (background)", color="blue")
+    #plt.hist(scores_p, bins=bins, density=True, alpha=0.6, label="p (background)", color ="red")
+
+    plt.xlabel("BDT score")
+    plt.ylabel("Normalized density")
+    plt.title("BDT score distribution (1D)")
+
+    plt.legend()
+    plt.tight_layout()
+
+    plt.savefig(outpath, dpi=200)
+    plt.close()
+
+
 
 def main(argv=None):
     args = _parse_args(argv)
@@ -712,10 +1275,15 @@ def main(argv=None):
         overwrite=args.overwrite,
     )
 
+
+
+    
     print("\nDone.")
     print(f"  Comparison summary: {outdir / 'comparison_summary.csv'}")
     print(f"  Headline plot:      {outdir / 'contam_vs_ptheta_baseline_vs_bdt.png'}")
     print(f"  C_p map:            {outdir / 'cp_to_K_map.png'}")
+
+
 
 
 if __name__ == "__main__":
