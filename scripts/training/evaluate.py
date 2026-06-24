@@ -632,11 +632,118 @@ def plot_ml_contamination_matched_theta(
 
     return fig
 
+def plot_ml_efficiency_fixed_efficiency_theta(
+    matched,
+    pStart, pEnd, pStep,
+    target_eff=0.8,
+    direct="."
+):
+    import numpy as np
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots()
+
+    # fixed theta bins: 5 bins from 5–35°
+    t_edges = np.linspace(5, 35, 6)
+    colors = ["black", "tab:blue", "tab:orange", "tab:green", "tab:red"]
+
+    n_p_bins = int((pEnd - pStart) / pStep)
+
+    for i in range(5):
+
+        theta_lo = t_edges[i]
+        theta_hi = t_edges[i + 1]
+
+        vals = []
+        errs = []
+
+        for j in range(n_p_bins):
+
+            p_lo = pStart + j * pStep
+            p_hi = p_lo + pStep
+
+            df_bin = matched[
+                (matched["p"] >= p_lo) &
+                (matched["p"] < p_hi) &
+                (matched["theta"] >= theta_lo) &
+                (matched["theta"] < theta_hi)
+            ]
+
+            if len(df_bin) == 0:
+                vals.append(np.nan)
+                errs.append(np.nan)
+                continue
+
+            # --- FIXED EFFICIENCY CUT ---
+            k_scores = df_bin.loc[df_bin["label"] == 1, "score"]
+
+            if len(k_scores) == 0:
+                vals.append(np.nan)
+                errs.append(np.nan)
+                continue
+
+            # threshold that gives desired efficiency
+            t_cut = np.quantile(k_scores, 1 - target_eff)
+
+            accepted = df_bin["score"] > t_cut
+
+            # =====================================================
+            # EFFICIENCY (FIXED PART)
+            # =====================================================
+            mc = df_bin["mc_matching_pid"].to_numpy()
+
+            true_K = (mc == 321)
+            denom = np.sum(true_K)
+
+            if denom == 0:
+                vals.append(np.nan)
+                errs.append(np.nan)
+                continue
+
+            num = np.sum(accepted & true_K)
+
+            r = num / denom
+            rErr = np.sqrt(r * (1 - r) / denom)
+
+            vals.append(r)
+            errs.append(rErr)
+
+        # --- plotting ---
+        edges = np.linspace(pStart, pEnd, len(vals) + 1)
+        x = (edges[:-1] + edges[1:]) / 2
+
+        vals = np.array(vals)
+        errs = np.array(errs)
+        mask = ~np.isnan(vals)
+
+        ax.errorbar(
+            x[mask],
+            vals[mask],
+            yerr=errs[mask],
+            fmt="o",
+            capsize=3,
+            color=colors[i],
+            label=f"{theta_lo:.0f}–{theta_hi:.0f}°"
+        )
+
+    ax.set_ylim(0, 1.1)
+    ax.set_xlabel("Momentum (GeV/c)")
+    ax.set_ylabel("Efficiency")
+    ax.set_title("ML efficiency at fixed efficiency")
+
+    ax.plot([], [], " ", label=f"target efficiency = {target_eff:.2f}")
+    ax.legend()
+
+    fig.tight_layout()
+    fig.savefig(f"{direct}/efficiency_fixed_eff_theta.png", dpi=150)
+    plt.close(fig)
+
+    return fig
+
 def plot_ml_contamination_matched_chi2pid_theta(
     df,
     pStart, pEnd, pStep,
     theta_edges=None,
-    threshold=0.5,
     direct="."
 ):
     import numpy as np
@@ -677,47 +784,73 @@ def plot_ml_contamination_matched_chi2pid_theta(
                 errs.append(np.nan)
                 continue
 
-            # ================================
-            # SAME DEFINITION AS HEATMAP
-            # ================================
+            # =====================================================
+            # 1. χ²PID efficiency (target)
+            # =====================================================
+            chi2_mask = passes_kplus_chi2pid_cut(
+                df_bin["chi2pid"].to_numpy(),
+                df_bin["p"].to_numpy()
+            )
+            chi2_eff = chi2_mask.mean()
 
-            score = df_bin["score"].to_numpy()
+            # =====================================================
+            # 2. BDT scores
+            # =====================================================
+            scores = df_bin["score"].to_numpy()
+
+            if len(scores) == 0:
+                vals.append(np.nan)
+                errs.append(np.nan)
+                continue
+
+            # =====================================================
+            # 3. FIND MATCHED BDT THRESHOLD
+            # =====================================================
+            thresholds = np.linspace(0.01, 0.99, 100)
+
+            best_t = thresholds[0]
+            best_diff = 1e9
+
+            for t in thresholds:
+                eff = np.mean(scores > t)
+                diff = abs(eff - chi2_eff)
+
+                if diff < best_diff:
+                    best_diff = diff
+                    best_t = t
+
+            # =====================================================
+            # 4. APPLY THAT EXACT BIN-SPECIFIC THRESHOLD
+            # =====================================================
+            accepted = scores > best_t
 
             label = df_bin["label"]
             label_notna = pd.notna(label)
             label_vals = np.where(label_notna, label.astype(float), np.nan)
 
-            accepted = score > threshold
-
-            # K efficiency denominator
-            n_K = np.sum(label_vals == 1)
-
-            # contamination denominator (ONLY labeled accepted)
             n_acc_lab = np.sum(accepted & label_notna.to_numpy())
 
-            if n_K == 0 or n_acc_lab == 0:
+            if n_acc_lab == 0:
                 vals.append(np.nan)
                 errs.append(np.nan)
                 continue
 
-            # contamination numerator: mis-ID K sample (label==0)
             n_wrong = np.sum(accepted & (label_vals == 0))
 
             r = n_wrong / n_acc_lab
-
-            # binomial-style uncertainty (same as your eval style)
             rErr = np.sqrt(r * (1 - r) / n_acc_lab)
 
             vals.append(r)
             errs.append(rErr)
 
+        # =========================================================
         # plotting
+        # =========================================================
         edges = np.linspace(pStart, pEnd, len(vals) + 1)
         x = (edges[:-1] + edges[1:]) / 2
 
         vals = np.array(vals)
         errs = np.array(errs)
-
         mask = ~np.isnan(vals)
 
         ax.errorbar(
@@ -732,21 +865,374 @@ def plot_ml_contamination_matched_chi2pid_theta(
 
     ax.set_ylim(0, 1.1)
     ax.set_xlabel("Momentum (GeV/c)")
-    ax.set_ylabel("π → K Contamination")
-    ax.set_title("ML contamination vs momentum (Chi2Pid Matched Efficiency)")
+    ax.set_ylabel("Contamination")
+    ax.set_title("BDT contamination at chi2pid-matched efficiency")
 
-    ax.plot([], [], " ", label=f"BDT cut = {threshold:.3f}")
     ax.legend()
-
     fig.tight_layout()
+
     outpath = f"{direct}/contamination_matched_chi2pid_theta.png"
     fig.savefig(outpath, dpi=150)
     plt.close(fig)
 
     return fig
 
-###### PURITY #########
 
+def plot_ml_eff_matched_chi2pid_theta(
+    df,
+    pStart, pEnd, pStep,
+    theta_edges=None,
+    direct="."
+):
+    import numpy as np
+    import matplotlib.pyplot as plt
+    import pandas as pd
+
+    if theta_edges is None:
+        theta_edges = np.linspace(5, 35, 6)
+
+    fig, ax = plt.subplots()
+
+    colors = ["black", "tab:blue", "tab:orange", "tab:green", "tab:red"]
+
+    n_p_bins = int((pEnd - pStart) / pStep)
+
+    for i in range(len(theta_edges) - 1):
+
+        theta_lo = theta_edges[i]
+        theta_hi = theta_edges[i + 1]
+
+        vals = []
+        errs = []
+
+        for j in range(n_p_bins):
+
+            p_lo = pStart + j * pStep
+            p_hi = p_lo + pStep
+
+            df_bin = df[
+                (df["p"] >= p_lo) &
+                (df["p"] < p_hi) &
+                (df["theta"] >= theta_lo) &
+                (df["theta"] < theta_hi)
+            ]
+
+            if len(df_bin) == 0:
+                vals.append(np.nan)
+                errs.append(np.nan)
+                continue
+
+            # =====================================================
+            # 1. χ²PID efficiency (target)
+            # =====================================================
+            chi2_mask = passes_kplus_chi2pid_cut(
+                df_bin["chi2pid"].to_numpy(),
+                df_bin["p"].to_numpy()
+            )
+            chi2_eff = chi2_mask.mean()
+
+            # =====================================================
+            # 2. BDT scores
+            # =====================================================
+            scores = df_bin["score"].to_numpy()
+
+            if len(scores) == 0:
+                vals.append(np.nan)
+                errs.append(np.nan)
+                continue
+
+            # =====================================================
+            # 3. FIND MATCHED BDT THRESHOLD
+            # =====================================================
+            thresholds = np.linspace(0.01, 0.99, 100)
+
+            best_t = thresholds[0]
+            best_diff = 1e9
+
+            for t in thresholds:
+                eff = np.mean(scores > t)
+                diff = abs(eff - chi2_eff)
+
+                if diff < best_diff:
+                    best_diff = diff
+                    best_t = t
+
+            # =====================================================
+            # 4. APPLY THAT EXACT BIN-SPECIFIC THRESHOLD
+            # =====================================================
+            accepted = scores > best_t
+
+            mc = df_bin["mc_matching_pid"].to_numpy()
+            valid = ~np.isnan(mc)
+
+            # =====================================================
+            # 5. TRUE EFFICIENCY (FIXED PART)
+            # =====================================================
+            n_true = np.sum(mc == 321)   # true K+
+            if n_true == 0:
+                vals.append(np.nan)
+                errs.append(np.nan)
+                continue
+
+            n_pass = np.sum(accepted & (mc == 321))
+
+            r = n_pass / n_true
+            rErr = np.sqrt(r * (1 - r) / n_true)
+
+            vals.append(r)
+            errs.append(rErr)
+
+        # =========================================================
+        # plotting
+        # =========================================================
+        edges = np.linspace(pStart, pEnd, len(vals) + 1)
+        x = (edges[:-1] + edges[1:]) / 2
+
+        vals = np.array(vals)
+        errs = np.array(errs)
+        mask = ~np.isnan(vals)
+
+        ax.errorbar(
+            x[mask],
+            vals[mask],
+            yerr=errs[mask],
+            fmt="o",
+            capsize=3,
+            color=colors[i % len(colors)],
+            label=f"{theta_lo:.0f}–{theta_hi:.0f}°"
+        )
+
+    ax.set_ylim(0, 1.1)
+    ax.set_xlabel("Momentum (GeV/c)")
+    ax.set_ylabel("Efficiency")
+    ax.set_title("BDT efficiency at chi2pid-matched")
+
+    ax.legend()
+    fig.tight_layout()
+
+    outpath = f"{direct}/efficiency_matched_chi2pid_theta.png"
+    fig.savefig(outpath, dpi=150)
+    plt.close(fig)
+
+    return fig
+###### comparisons #########
+def plot_contamination_chi2pid_vs_bdt(
+    df,
+    pStart,
+    pEnd,
+    pStep,
+    direct="."
+):
+    import numpy as np
+    import matplotlib.pyplot as plt
+    import pandas as pd
+
+    fig, ax = plt.subplots()
+
+    ml_vals = []
+    ml_errs = []
+
+    chi2_vals = []
+    chi2_errs = []
+
+    n_p_bins = int((pEnd - pStart) / pStep)
+
+    for j in range(n_p_bins):
+
+        p_lo = pStart + j * pStep
+        p_hi = p_lo + pStep
+
+        df_bin = df[
+            (df["p"] >= p_lo) &
+            (df["p"] < p_hi)
+        ]
+
+        if len(df_bin) == 0:
+            ml_vals.append(np.nan)
+            ml_errs.append(np.nan)
+            chi2_vals.append(np.nan)
+            chi2_errs.append(np.nan)
+            continue
+
+        # =====================================================
+        # χ²PID efficiency in this momentum bin
+        # =====================================================
+
+        chi2_mask = passes_kplus_chi2pid_cut(
+            df_bin["chi2pid"].to_numpy(),
+            df_bin["p"].to_numpy()
+        )
+
+        n_true_k = np.sum(df_bin["mc_matching_pid"] == 321)
+
+        if n_true_k == 0:
+            ml_vals.append(np.nan)
+            ml_errs.append(np.nan)
+            chi2_vals.append(np.nan)
+            chi2_errs.append(np.nan)
+            continue
+
+        chi2_eff = (
+            np.sum(
+                chi2_mask &
+                (df_bin["mc_matching_pid"].to_numpy() == 321)
+            )
+            / n_true_k
+        )
+
+        # =====================================================
+        # Find BDT threshold with same efficiency
+        # =====================================================
+
+        scores = df_bin["score"].to_numpy()
+
+        thresholds = np.linspace(0.01, 0.99, 100)
+
+        best_t = thresholds[0]
+        best_diff = 1e9
+
+        for t in thresholds:
+
+            accepted = scores > t
+
+            eff = (
+                np.sum(
+                    accepted &
+                    (df_bin["mc_matching_pid"].to_numpy() == 321)
+                )
+                / n_true_k
+            )
+
+            diff = abs(eff - chi2_eff)
+
+            if diff < best_diff:
+                best_diff = diff
+                best_t = t
+
+        # =====================================================
+        # ML contamination at matched efficiency
+        # =====================================================
+
+        accepted_ml = scores > best_t
+
+        n_acc_ml = np.sum(
+            accepted_ml &
+            (df_bin["pid"].to_numpy() == 321)
+        )
+
+        if n_acc_ml > 0:
+
+            n_bad_ml = np.sum(
+                accepted_ml &
+                (df_bin["pid"].to_numpy() == 321) &
+                (df_bin["mc_matching_pid"].to_numpy() == 211)
+            )
+
+            r_ml = n_bad_ml / n_acc_ml
+            rErr_ml = np.sqrt(
+                r_ml * (1 - r_ml) / n_acc_ml
+            )
+
+        else:
+
+            r_ml = np.nan
+            rErr_ml = np.nan
+
+        ml_vals.append(r_ml)
+        ml_errs.append(rErr_ml)
+
+        # =====================================================
+        # χ²PID contamination
+        # =====================================================
+
+        n_acc_chi2 = np.sum(
+            chi2_mask &
+            (df_bin["pid"].to_numpy() == 321)
+        )
+
+        if n_acc_chi2 > 0:
+
+            n_bad_chi2 = np.sum(
+                chi2_mask &
+                (df_bin["pid"].to_numpy() == 321) &
+                (df_bin["mc_matching_pid"].to_numpy() == 211)
+            )
+
+            r_chi2 = n_bad_chi2 / n_acc_chi2
+            rErr_chi2 = np.sqrt(
+                r_chi2 * (1 - r_chi2) / n_acc_chi2
+            )
+
+        else:
+
+            r_chi2 = np.nan
+            rErr_chi2 = np.nan
+
+        chi2_vals.append(r_chi2)
+        chi2_errs.append(rErr_chi2)
+
+    # =========================================================
+    # Plot
+    # =========================================================
+
+    edges = np.linspace(
+        pStart,
+        pEnd,
+        len(ml_vals) + 1
+    )
+
+    x = (edges[:-1] + edges[1:]) / 2
+
+    ml_vals = np.array(ml_vals)
+    ml_errs = np.array(ml_errs)
+
+    chi2_vals = np.array(chi2_vals)
+    chi2_errs = np.array(chi2_errs)
+
+    mask_ml = ~np.isnan(ml_vals)
+    mask_chi2 = ~np.isnan(chi2_vals)
+
+    ax.errorbar(
+        x[mask_ml],
+        ml_vals[mask_ml],
+        yerr=ml_errs[mask_ml],
+        fmt="o",
+        capsize=3,
+        color="tab:blue",
+        label="BDT (matched efficiency)"
+    )
+
+    ax.errorbar(
+        x[mask_chi2],
+        chi2_vals[mask_chi2],
+        yerr=chi2_errs[mask_chi2],
+        fmt="o",
+        capsize=3,
+        color="black",
+        label="Baseline"
+    )
+
+    ax.set_ylim(0, 1.1)
+    ax.set_xlabel("Momentum (GeV/c)")
+    ax.set_ylabel("Contamination")
+    ax.set_title(
+        "Contamination: BaseLine vs BDT\n"
+        "(BDT matched efficiency)"
+    )
+
+    ax.legend()
+
+    fig.tight_layout()
+
+    outpath = (
+        f"{direct}/"
+        "contamination_chi2pid_vs_bdt.png"
+    )
+
+    fig.savefig(outpath, dpi=150)
+    plt.close(fig)
+
+    return fig
 
 
 
@@ -1119,8 +1605,27 @@ def evaluate_model(
         0.5, 3.2, 0.27,
         direct=str(outdir)
     )
+    plot_ml_eff_matched_chi2pid_theta(
+        df,
+        0.5, 3.2, 0.27,
+        direct=str(outdir)
+    )
+    plot_ml_efficiency_fixed_efficiency_theta(
+        matched=df,
+        pStart=0.5,
+        pEnd=3.2,
+        pStep=0.27,
+        target_eff=0.8,
+        direct=str(outdir)
+    )
 
-    
+    plot_contamination_chi2pid_vs_bdt(
+        df=df,
+        pStart=0.5,
+        pEnd=3.2,
+        pStep=0.27,
+        direct=str(outdir)
+    )
 
     # ── README ─────────────────────────────────────────────────────────────────
     readme = "\n".join([
