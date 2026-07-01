@@ -308,7 +308,7 @@ def _heatmap(
                 ))
             else:
                 if thresholds is not None and not np.isnan(thresholds[pi, ti]):
-                    text = f"{data[pi, ti]:.2f} | {thresholds[pi, ti]:.2f}"
+                    text = f"Cont:{data[pi, ti]:.2f} \n BDT:{thresholds[pi, ti]:.2f}"
                 else:
                     text = f"{data[pi, ti]:.2f}"
 
@@ -318,7 +318,7 @@ def _heatmap(
                     text,
                     ha="center",
                     va="center",
-                    fontsize=6,
+                    fontsize=8,
                     color="white",
                 )
 
@@ -1918,6 +1918,7 @@ def ComputeChi2PIDcontams(
     import numpy as np
 
     df = df[df["mc_matching_pid"] != -9999].copy()
+    df2=df
 
     step = (pEnd - pStart) / pBinN
 
@@ -2199,9 +2200,9 @@ def PlotMLContamCompare(
     plt.xlabel("Momentum (GeV/c)")
     plt.ylabel("Contamination")
     plt.title("ML vs Chi2PID Contamination Comparison "+label)
-    plt.ylim(0, 1.1)
+    plt.ylim(0, 0.51)
     plt.legend()
-
+    plt.grid(False)
     outpath = os.path.join(outdir, name+"ml_compare_chi2pid_contam.png")
     plt.savefig(outpath, dpi=150)
     plt.close()
@@ -3052,11 +3053,7 @@ def evaluate_model(
         target_eff=0.8,
         direct=str(outdir)
     )
-    plot_ml_contamination_matched_chi2pid_theta(
-        df,
-        0.5, 3.2, 0.27,
-        direct=str(outdir)
-    )
+  
     #plot_ml_contamination_matched_chi2pidLess_theta(
      #   df,
       ## direct=str(outdir)
@@ -3389,7 +3386,7 @@ def load_model_and_data(
         tEnd=23,
         label="17<theta<23"
     )
-
+    
 
 
 def main(argv=None):
