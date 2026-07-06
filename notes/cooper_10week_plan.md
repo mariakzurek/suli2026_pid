@@ -265,7 +265,7 @@ Concretely:
 - Approve the train/val/test split.
 - 1-hour meeting: walk through the baseline contamination plot. Decide whether the (p, theta) binning needs revision before Week 4.
 - Check in with Cooper on Python/ML progress. If reading is not getting done, adjust Week 4 expectations.
-- **Make decision on hyperon-tagged kaon-truth channel** (see Decision Points). This decision blocks Week 8 planning.
+- **Make decision on hyperon-tagged kaon-truth channel** (see Decision Points). This decision is no longer on the critical path — the W8/W9 validation now runs on RICH-overlap (primary) and exclusive missing-mass (secondary), not on a hyperon tag. D3 is a supplementary-sanity-check question at this point; skip is a defensible answer.
 - **Sign off on the Week 1-2 report draft** after all Overleaf comments are resolved and the PDF compiles clean.
 - If Cooper has not used slurm arrays before, help set up the submission script at the start of the week — do not let this block ntuple production past Tuesday.
 
@@ -322,7 +322,7 @@ Concretely:
 - BDT performance disappointing or anomalous (e.g. perfectly tracks chi2pid). Severity M. Mitigation: this is data and reality. If BDT only learns chi2pid, that is a real finding. Diagnose why; check feature importances immediately.
 - Reweighting depends on RGA data sample Cooper does not yet have on hand. Severity M. Mitigation: do the unweighted fit first; add reweighting in Week 5.
 
-**Fallback / scope-down.** If the BDT training hits a wall (e.g. memory at full sample size), train on a subset (5M tracks is plenty for a first pass) and document. Full-statistics training can be re-run in Week 6.
+**Fallback / scope-down.** If the BDT training hits a wall (e.g. memory at full sample size), train on a subset (5M tracks is plenty for a first pass) and document. Full-statistics training can be re-run in Week 7 alongside the two new BDTs on the full momentum range.
 
 ---
 
@@ -340,7 +340,7 @@ The `week4-tier-flexible` branch decouples dataset schema from training features
 
 **Cooper's tasks — second half (Wed–Fri): per-bin optimization and analysis-channel application on the locked tier.**
 - Per-(p, theta)-bin threshold optimization on the chosen tier using FOM = `N_K / sqrt(N_K + N_pi)`. Sweep BDT score threshold 0 to 0.95 per bin; pick the maximum. Use the validation set for threshold selection — never the test set. Tabulate the thresholds.
-- Apply the optimized BDT to the analysis-channel ntuple (`ep → e' p K+ X`, from `processing_mc_three_particles.groovy`). For each event run the BDT on the K+ candidate and accept if the score exceeds the bin-optimal threshold. Compare accepted-event count and pion-truth contamination to the EB+chi2pid baseline. This stays on MC. Data application is **Week 8** (exclusive missing-mass method); do not promote it here.
+- Apply the optimized BDT to the analysis-channel ntuple (`ep → e' p K+ X`, from `processing_mc_three_particles.groovy`). For each event run the BDT on the K+ candidate and accept if the score exceeds the bin-optimal threshold. Compare accepted-event count and pion-truth contamination to the EB+chi2pid baseline. This stays on MC. Data application is **Week 8** (SIDIS-inclusive + exclusive channels; RICH-overlap primary and exclusive missing-mass secondary as cross-checks); do not promote it here.
 - Quote the first headline number on the chosen tier, not on tier 1: "for the `ep → e' p K+ X` MC sample, at fixed kaon efficiency `eps_0`, baseline gives contamination `C_baseline = X%`, BDT gives `C_BDT = Y%`, improvement = `(X-Y)/X = Z%`." If low-p remains problematic and the tier choice does not fix it, quote the number with an honest per-bin breakdown rather than burying the issue in a single average.
 - Plot M_X(e' p K+) distributions for {all events, baseline-cut events, BDT-cut events}, color-coded by truth class.
 - Write a 1-page section of the eventual report: "MC-truth comparison of BDT to EB+chi2pid baseline on the `ep → e' p K+ X` channel," covering both the tier choice and the headline number. Writeup deposit, not the final report.
@@ -367,124 +367,174 @@ The `week4-tier-flexible` branch decouples dataset schema from training features
 - Low-p underperformance is structural rather than feature-set-fixable (class imbalance, training-vs-evaluation class-balance mismatch, evaluation-code artifact at low stats, or a real kinematic bias the calibration cannot absorb). Severity M–H. Mitigation: if tier 3 does not close the gap either, Maria decides whether to scope the collaboration-meeting result down to mid/high-p only, with the low-p caveat documented honestly rather than hidden.
 - Tier-comparison results are inconclusive — e.g. tier 2 partially improves low-p but with mixed signals on mid-p, or feature importance flips between tiers in ways that don't suggest a clean choice. Severity M. Mitigation: ship tier 2 (the obvious physics-motivated middle option) rather than spending the rest of the week chasing the cleanest possible ablation.
 - Per-bin optimization overfits because some bins have low MC statistics. Severity M. Mitigation: use the validation set for threshold selection, not the test set. Apply on the test set only once.
-- (p, theta) reweighting (originally Week 4) is now punted again — neither the tier comparison nor the headline number in Week 5 will be reweighted. Severity L–M. Mitigation: this is a tracked debt; pick it up in Week 6 or note it explicitly in the writeup so it doesn't get lost.
+- (p, theta) reweighting (originally Week 4) is now punted again — neither the tier comparison nor the headline number in Week 5 will be reweighted. Severity L–M. Mitigation: this is a tracked debt. Week 6 (collab meeting) has no analysis capacity for it; the natural pickup point is Week 7 when the two new BDTs are retrained on full-p — apply `sample_weight` reweighting at that retraining step or note the omission explicitly in the writeup so it doesn't get lost. If it slips past W7, it becomes a quoted systematic on the W9 RICH-vs-MC comparison rather than a re-training.
 
-**Fallback / scope-down.** If the tier comparison does not resolve the low-p question by end-of-day Wednesday, ship the tier-2 model with honest per-bin numbers and a documented caveat about low-p, and run the second-half tasks on that. Do not spend Thursday and Friday chasing a structural issue at the expense of the analysis-channel application and the mid-project writeup; the chase, if needed, fits better in Week 6 once there is a deliverable in hand.
-
----
-
-### Week 6 — MLP as second model family; BDT vs MLP comparison; final model decision
-
-**Theme.** Train the MLP as a second model family. Compare BDT vs MLP head-to-head. Decide which is the final model.
-
-**Cooper's tasks.**
-- **MLP.** Use `sklearn.neural_network.MLPClassifier` or a small PyTorch net. Start small: 2 hidden layers of 64 units, ReLU, Adam, early stopping. Apply `StandardScaler` to features first (mandatory for MLP; not needed for BDT). Impute -9999 with per-feature median before scaling, and add binary missing-indicator features (`feature_X_present`) for PCAL and FTOF layer 2 — missingness is physically informative. Save as `mlp_v1.pkl`. Apply `CalibratedClassifierCV` (Platt) and produce a reliability diagram.
-- **Comparison.** Apply the same per-bin threshold optimization to the MLP. Compare contamination vs (p, theta) for {baseline, BDT, MLP}. Compute Brier score, log-loss, and AUC for each on the test set. Tabulate.
-- **Calibration check for BDT.** Also check isotonic calibration for the BDT (in addition to Platt from Week 4). Produce both reliability diagrams. The better one goes into `bdt_final.pkl`.
-- **Model decision.** Pick whichever has the best contamination at fixed efficiency on the analysis-channel test set, with a calibration that passes the reliability-diagram eyeball test.
-
-**Maria's tasks.**
-- Review calibration plots. Decide whether isotonic or Platt is the production choice.
-- Make the final model family decision (BDT vs MLP). This drives all downstream work.
-
-**Done when.**
-- MLP trained, calibrated, saved as `mlp_v1.pkl`.
-- Comparison table: baseline | BDT | MLP, columns = {Brier, log-loss, AUC, contam at matched eff per bin}.
-- Reliability diagrams for both models, calibrated and uncalibrated.
-- Final model family decided and documented.
-
-**Risks / dependencies.**
-- MLP underperforms because of missing features (-9999 propagating through). Severity M. Mitigation: the missing-indicator approach described above handles this explicitly.
-- MLP training is slow on ifarm CPU. Severity M. Mitigation: keep the architecture small (2 × 64). If still too slow, use a GPU node (`--partition=gpu`) or fall back to sklearn's `MLPClassifier` which is faster for smaller networks.
-
-**Fallback / scope-down.** Drop MLP entirely. BDT alone is the final model. The story is still complete — one model family, well-tuned and calibrated, is better than two models done poorly.
+**Fallback / scope-down.** If the tier comparison does not resolve the low-p question by end-of-day Wednesday, ship the tier-2 model with honest per-bin numbers and a documented caveat about low-p, and run the second-half tasks on that. Do not spend Thursday and Friday chasing a structural issue at the expense of the analysis-channel application and the mid-project writeup; the chase, if needed, is picked up in Week 7 when the two new full-p BDTs get trained — that retraining is the natural moment to re-examine whether the low-p behavior is structural or was a current-p-range artifact.
 
 ---
 
-### Week 7 — Model refinement; hyperparameter tuning; feature ablation
+### Week 6 — CLAS collaboration meeting: presentation prep and delivery
 
-**Theme.** Take the chosen model (from Week 6) and squeeze the last real performance out of it. Understand which features are actually driving the gain.
+**Theme.** The anchor for this week is Cooper's talk at the CLAS collaboration meeting. Everything else is subordinate to that deliverable. This is not a week for opening new analysis threads; it is prep, dry runs, and the presentation itself. A real collab talk takes real prep — treat it as a week-long deliverable, not a two-day one. The Week-4 flash-talk material evolves into a fuller collab-meeting narrative: tier-1-vs-2-vs-3 comparison and locked tier choice from Week 5, the per-bin FOM threshold work from Week 5's second half, the first `apply_bdt` results on the analysis channel if they are available in a defensible state, and the K⁺ ID contamination numbers as they currently stand against the EB+chi2pid baseline. New MLP training, new model families, new data-side work — all pushed to Weeks 7 and 8.
 
 **Cooper's tasks.**
-- **Hyperparameter tuning.** Run a grid or random search on the chosen model's top 3–4 hyperparameters (for LightGBM: `n_estimators`, `learning_rate`, `max_depth`, `min_child_samples`; for MLP: learning rate, hidden layer sizes, dropout). Use the validation set for selection; apply the winner to the test set only once.
-- **Feature ablation.** Drop one feature group at a time (e.g., remove all FTOF variables; remove ECAL; remove HTCC nphe; remove chi2pid). Retrain and compare AUC and per-bin contamination. Quantify: "removing X degrades contamination by Y% in the worst bin." This tells you which features are load-bearing.
-- **Feature importance / SHAP.** For LightGBM, extract the built-in feature importance (gain). Optionally compute SHAP values for a random subset of test tracks. Plot the top-10 features by importance. This section should be presentable in the report and poster.
-- Final model choice confirmed. Save as `model_final.pkl`. Refactor the training pipeline as a single command: `python train.py --config config.yaml --output model_final.pkl`. README explains how to reproduce from scratch.
+- **Slide draft (Mon–Tue).** Assemble the talk from Weeks 4–5 artifacts. Structure follows the analysis lineage: motivation and channel; tier concept and the Week-5 tier comparison; locked tier + rationale; per-bin FOM thresholds on validation; headline contamination-vs-(p, θ) figure on the locked tier; if defensible, first `apply_bdt` numbers on the analysis-channel MC; what is coming next (data application, MLP comparison, RICH cross-check). Do not put anything on a slide that has not been signed off in an earlier week — the collab audience notices unvetted numbers.
+- **Internal dry run with Maria (Wed).** Full talk, timed, in front of Maria. Expect substantive revisions coming out of this — content order, figure choice, what gets cut. Budget Thursday for those revisions.
+- **Final polish (Thu).** Rework slides per Maria's dry-run feedback. Rehearse solo at least twice at the target length. Confirm figure resolution on a projector-scale display; the per-bin headline plot cannot be a screen-shrunk PNG.
+- **Deliver the talk (Thu/Fri, per meeting agenda).** Take notes on questions and feedback during and immediately after — they feed directly into Week 7 and Week 8 framing.
+- **Post-meeting writeup (Fri).** One paragraph in `notes/cooper_week6_collab_feedback.md` capturing (a) what questions came up, (b) any specific criticisms of the tier choice, per-bin methodology, or the direction, (c) any concrete follow-up items Maria or the audience raised. This is the input Week 7's threshold refinement and Week 8's model decision will refer back to.
 
 **Maria's tasks.**
-- Sign off on final model choice and hyperparameter settings.
-- Review the feature ablation results. Flag any surprising finding (e.g., chi2pid alone explains 90% of the gain — or doesn't).
+- Attend and lead the dry run on Wednesday. Give written feedback same-day so Cooper has a full working day for revisions.
+- Attend the talk. Take independent notes on collaboration questions; compare against Cooper's writeup on Friday.
+- Decide, based on the dry run, whether the `apply_bdt` first-results slide is defensible for the collab audience or should be held back to Week 8.
 
 **Done when.**
-- `model_final.pkl` committed. README updated.
-- Training pipeline reproducible from one command.
-- Feature importance plot in `/figures/feature_importance.png`.
-- Feature ablation table: per-group AUC and contamination change, in `/notes/feature_ablation.md`.
+- Slide deck delivered at the CLAS collab meeting.
+- `notes/cooper_week6_collab_feedback.md` written and shared with Maria.
+- Any collab-meeting follow-up items that affect Week 7 or Week 8 flagged explicitly in the writeup.
 
 **Risks / dependencies.**
-- Hyperparameter tuning takes all week and yields negligible gain. Severity L. Mitigation: cap the tuning at 2 days. If the default hyperparameters from Week 4 are already near-optimal (common with LightGBM), document that and move on to ablation.
-- Feature ablation reveals that chi2pid dominates and nothing else matters. Severity M (scientifically interesting, not a blocker). Mitigation: report honestly. The ML still provides a calibrated probability, which the hard cut does not.
+- `apply_bdt` results are not defensible in time for the deck. Severity L. Mitigation: hold that slide back; present through the per-bin FOM story and flag data application as Week-8 work. Nothing in the talk depends on `apply_bdt` being ready.
+- Dry-run feedback requires substantive slide reordering. Severity M (expected, not a failure). Mitigation: the schedule budgets Thursday for exactly this. Do not treat Wednesday dry-run comments as optional.
+- Collab-meeting question exposes a real gap in the tier-choice or per-bin methodology. Severity M. Mitigation: capture it in the feedback writeup, do not try to fix it live during the talk. Week 7 or Week 8 absorbs the response.
 
-**Fallback / scope-down.** If ablation takes longer than projected, reduce it to 3 feature groups (FTOF, ECAL, everything else). The key finding is whether chi2pid alone is sufficient — answer that question and stop if pressed for time.
+**Fallback / scope-down.** If time is tight, cut the `apply_bdt` slide and end on the per-bin FOM headline. Cut MLP-preview material entirely — the MLP is Week 8, not Week 6.
 
 ---
 
-### Week 8 — Exclusive missing-mass method: full implementation, MC validation, first contamination numbers
+### Week 7 — Threshold tuning refinement; two new BDTs on the full momentum range
 
-**Theme.** Implement the exclusive missing-mass data-driven method end-to-end. Validate it against MC truth. Produce the first data-side contamination table.
+**Theme.** Two threads in parallel. First, extend the Week-5 per-bin FOM threshold work into a fuller sweep on the current BDT, now with the collab-meeting feedback incorporated — this is refinement of what was started, not a fresh formulation. Second, train two new BDTs on the **full momentum range** using the same tier features locked at the end of Week 5: a binary K⁺ vs non-K⁺ model (the current formulation, retrained without the `--p-max` cut) and a three-class K⁺ / π⁺ / p multiclass model. The tier question is closed for the remainder of the project; do not reopen it here. What is open is momentum coverage and target formulation.
+
+**Prerequisite — parquet rebuild without the p-max cut.** The current parquet built by `scripts/training/build_dataset.py` applies `--p-max`, which caps the training momentum. Both new BDTs need the full momentum range, which means rebuilding the parquet (or building a `v02` parquet without the p-max cut) before either training can start. This is a Monday task, not something to discover on Wednesday. Bump the parquet suffix rather than overwriting `v01`, and record the manifest — the Week-5 threshold-refinement thread still runs against the current-p-range parquet, so both must coexist on disk.
 
 **Cooper's tasks.**
-- Pull the RGA pass-2 data ntuples for the neutron-tagged sample (`ep → e h+ X`, neutron-tagged). Paths confirmed with Maria; if not yet on hand, use MC-only missing-mass method as described in the fallback below.
-- **Full missing-mass method implementation.** Produce the M_X(e h+) spectrum for h+ = (EB-pi+, EB-K+, EB-p) separately, in all (p, theta) bins. Identify the neutron peak at M_X ≈ 0.94 GeV. Sideband-subtract (signal window: 0.85–1.05 GeV; sidebands: 0.55–0.75 and 1.15–1.35 GeV). Count events under the neutron peak with EB-K+ ID; divide by total under-peak count = pi-to-K mis-ID rate per bin. Tabulate `C_miss_mass(p, theta)` for all bins.
-- **MC validation of the missing-mass method.** Apply the identical procedure to MC. Compare `C_miss_mass^MC(p, theta)` to `C_MC_truth(p, theta)`. Plot the ratio per bin. This is the method closure test: if the missing-mass method recovers MC truth on MC, it is trustworthy on data.
-- **First contamination numbers.** Compare `C_miss_mass(p, theta)` (data) to `C_MC_truth(p, theta)` (MC). Plot side by side with error bars. If they agree within stated systematics, that's the primary result. If not, investigate and document honestly.
-- Begin drafting the report section "Data-driven validation" — describe the exclusive missing-mass method, present the closure test, present the data results.
+
+*Thread 1 — threshold tuning on the existing BDT (current p-range).*
+- Extend the Week-5 per-(p, θ)-bin FOM sweep. Widen the threshold grid where the Week-5 optima landed near a grid endpoint, add finer resolution near the optimum, and re-tabulate. Incorporate any per-bin methodology feedback from the collab-meeting writeup — e.g., if the audience flagged low-stat bins or bin-edge behavior, address it here.
+- Re-quote the headline contamination-vs-(p, θ) numbers on the current-p-range BDT with the refined thresholds. This is the reference number the two new full-range BDTs will be compared against in Week 8.
+- Commit the refined threshold table and the updated headline plot. This work stays on the locked tier and the current parquet.
+
+*Thread 2 — two new BDTs on the full momentum range.*
+- Rebuild the parquet without the `--p-max` cut (see prerequisite above). Bump the dataset version — `datasets/v02/` or equivalent. Record the manifest.
+- **BDT-1: binary K⁺ vs non-K⁺, full p-range.** Same tier features as the locked Week-5 choice. Same Week-4 fixed LightGBM hyperparameters (`n_estimators=200, learning_rate=0.05, max_depth=6, objective='binary', random_state=42`). Same Platt calibration on a held-out slice of train. Save under `/work/clas12/$USER/SULI/models/tier{N}_binary_fullp_vNN/`.
+- **BDT-2: three-class K⁺ / π⁺ / p, full p-range.** Same tier features. LightGBM in multiclass mode (`objective='multiclass', num_class=3`). Class labels are truth species restricted to {K⁺, π⁺, p} — decide with Maria whether other truth species collapse into an "other" fourth class or are dropped from the training set; document the choice in the manifest. Save under `/work/clas12/$USER/SULI/models/tier{N}_3class_fullp_vNN/`.
+- **First-pass evaluation of both new BDTs.** Per-(p, θ)-bin AUC (for binary) and per-class ROC / one-vs-rest AUC (for multiclass) on the validation set. Sanity-check that extending to full p does not degrade the mid-p region where the current model works. Do not run the full per-bin FOM optimization here — that lives in Week 8 alongside the model decision.
 
 **Maria's tasks.**
-- Review missing-mass method closure-test plot. Sanity check: neutron peak should be well-resolved; closure ratio should be ≈1 within errors.
-- Decide whether to consult with the method's originators for sanity check on method details.
-- Mid-week meeting on the first contamination numbers.
+- Approve the parquet rebuild plan and the version-bump convention Monday morning. This blocks Thread 2.
+- Decide the multiclass class-set question (K⁺/π⁺/p only vs K⁺/π⁺/p/other) before Cooper trains BDT-2.
+- Mid-week check-in on Thread-1 threshold refinement. Confirm the refined thresholds are ready to be the Week-8 comparison reference before Cooper hands them off.
 
 **Done when.**
-- Missing-mass method contamination table complete for all (p, theta) bins, in CSV (`C_miss_mass_data.csv`).
-- MC closure plot for the missing-mass method in `/figures/miss_mass_closure.png`.
-- Missing-mass vs MC-truth comparison plot in `/figures/miss_mass_vs_mc_truth.png`.
+- Refined per-bin threshold table for the current-p-range BDT committed, with the updated headline plot.
+- `v02` parquet (full p-range) built and manifest recorded.
+- `bdt_binary_fullp` model artifact saved with wrapper dict and features list.
+- `bdt_3class_fullp` model artifact saved with wrapper dict and features list.
+- First-pass validation-set AUC (per bin, per class) for both new BDTs tabulated in `notes/cooper_week7_fullp_bdts.md`.
 
 **Risks / dependencies.**
-- Data ntuples not yet produced or not on Cooper's path. Severity H if not resolved. Mitigation: use MC-only missing-mass method (apply the method to MC; check closure against MC truth). Validates the method even before data is ready.
-- Missing-mass method and MC-truth disagree by >2σ in many bins. Severity M-H. Mitigation: this is real physics. Investigate: does the data have a contamination the MC doesn't capture? Is the neutron-peak sideband subtraction biased? Document the discrepancy honestly; do not paper over it.
-- The pi-to-K mis-ID rate is dominated by combinatoric background, not real mis-ID. Severity M. Mitigation: the sideband subtraction handles this; verify the sideband regions are genuinely background-only by checking the M_X shape.
+- Parquet rebuild takes longer than expected because the underlying MC ntuples do not have the full momentum coverage assumed. Severity M. Mitigation: check the p-distribution in the source ROOTs Monday before launching the rebuild; if the ntuples are themselves p-max-capped upstream, the "full p-range" is really "full available p-range" — document that and proceed.
+- Multiclass BDT is worse than the binary K⁺ vs non-K⁺ in the K⁺ metrics that matter for this analysis. Severity L (this is the question Week 8 exists to answer). Mitigation: no mitigation needed; the answer is the point.
+- Full-p training exposes low-stat regions at very high p that the current-p-range BDT never saw. Severity M. Mitigation: log per-bin train / val counts and flag any bin below a stat floor for exclusion from the Week-8 comparison. Do not silently include statistics-starved bins in the headline.
 
-**Fallback / scope-down.** If data ntuples are unavailable, MC-only missing-mass method (closure test only) is the deliverable for the week. The data result moves to Week 9.
+**Fallback / scope-down.** If Thread 2 slips, ship BDT-1 (binary full-p) only. BDT-2 (3-class) moves to early Week 8 as a parallel thread with the MLP. Do not drop the threshold-refinement Thread 1 — that is the deliverable the Week-6 collab talk asked for.
 
 ---
 
-### Week 9 — ML applied to neutron-tagged sample on data; ML-vs-baseline contamination plot; report and poster drafts
+### Week 8 — MLP as second model family; final model decision; apply to data
 
-**Theme.** Apply the final ML model to the data-side neutron-tagged sample. Produce the definitive ML-vs-baseline comparison. Draft the full report and poster.
+**Theme.** Three parts, sequenced. First, train the MLP as a second model family on all three formulations that exist coming out of Week 7 (binary current-p-range, binary full-p-range, 3-class full-p-range) — this is what was originally Week 6, deferred to fit around the collab meeting. Second, make the final model decision: which family (BDT or MLP), which formulation (binary vs 3-class), which threshold strategy. This is the go/no-go for the analysis application. Third, apply the chosen model to data in two channels and cross-check the pion-contamination estimate against RICH.
+
+**Prerequisite — exclusive-channel data ntuple.** The SIDIS-inclusive data ntuple (`ep → eK X`) already exists at `/volatile/clas12/zurek/SULI/data_v01/`. The exclusive-with-proton channel (`ep → e p K X`, both proton and kaon detected in FD) does **not** exist yet and Cooper produces it this week. Extend `~/CLAS/SULI/clas12_analysis_software/processing_scripts/processing_data_pid_training.groovy` (or a sibling script — decide with Maria whether to fork or extend) to select events with a detected proton alongside the kaon and electron, then run the production via the existing slurm wrapper. Output to `/volatile/clas12/$USER/SULI/data_exclusive_v01/`. This ntuple is what enables the exclusive missing-mass cross-check; without it, part 3 is blocked.
 
 **Cooper's tasks.**
-- **Apply final ML classifier to the neutron-tagged sample on data.** For each event in the neutron-tagged sample, run `model_final` on the K+ candidate. Apply the per-(p, theta)-bin threshold. Compare `C_ML(p, theta)` to `C_baseline(p, theta)` and `C_miss_mass(p, theta)`. This is the primary result: ML reduces contamination in data, measured by an independent data-driven method.
-- **ML-vs-baseline contamination plot.** Per (p, theta) bin: plot {baseline, ML, missing-mass method} contamination with error bars. This is the headline figure for the poster. Make it publication-quality.
-- **RICH cross-check (where coverage exists).** In the RICH acceptance (`p > 1.75 GeV, theta < 20°`, sector 4): select `ep → e pi+ X` with the pi+ RICH-tagged (`best_PID == 211`, `RQ > 0.2`, `N_photons > 3`). The fraction with EB-K+ ID gives an independent contamination estimate. Overlay RICH cross-check points on the comparison plot for the bins where they exist. This is a cross-check, not a standalone method — a handful of bins is sufficient.
-- **Report draft.** Full pass on the ~10-page written report. Sections: (1) introduction and channel; (2) baseline and ML pipeline; (3) MC-truth comparison; (4) data-driven validation (exclusive missing-mass method, RICH cross-check); (5) systematic uncertainties; (6) conclusion and headline number.
-- **Poster draft.** Take the report's figures and tables, lay them out for the SULI poster format. First pass.
+
+*Part 1 — MLP as second model family.*
+- Train MLPs matching all three BDT formulations from Weeks 5/7: binary current-p-range, binary full-p-range, 3-class full-p-range. `sklearn.neural_network.MLPClassifier` or a small PyTorch net, 2 hidden layers of 64 units, ReLU, Adam, early stopping. Apply `StandardScaler` first (mandatory for MLP; not needed for BDT), impute -9999 with per-feature median before scaling, add binary missing-indicator features for the physically-informative missing groups (PCAL, FTOF layer 2). Platt calibration and a reliability diagram per model.
+- Head-to-head comparison: for each of the three formulations, tabulate {BDT, MLP} × {Brier, log-loss, AUC or one-vs-rest AUC, per-bin C^π→K at matched K⁺ efficiency}. Same test set discipline as before — touched exactly once for the reported numbers.
+
+*Part 2 — final model decision.*
+- Pick the family, the formulation, and the threshold strategy. Write the decision and its justification in `notes/cooper_week8_model_decision.md` with the head-to-head tables as evidence. Sign-off from Maria required before Part 3 begins; this is the pipeline-freeze moment for the analysis application. Save the chosen artifact as `model_final.joblib` under `/work/clas12/$USER/SULI/models/`.
+
+*Part 3 — apply to data.*
+- **SIDIS-inclusive channel (`ep → eK X`).** Run `apply_bdt.py` (the Week-6-implementer PR) on `/volatile/clas12/zurek/SULI/data_v01/`. Apply the chosen per-bin threshold (or class-probability rule, for the 3-class case). This is the standard channel; produce ML-vs-baseline contamination-per-bin numbers as the primary data-side deliverable.
+- **Exclusive channel (`ep → e p K X`).** Once the new ntuple exists (see prerequisite), run `apply_bdt.py` on it. The exclusive channel exists here specifically to enable the RICH overlap cross-check and the missing-mass cross-check below.
+- **Primary validation: RICH overlap in data.** In the (p, θ) region where the RICH is instrumented and providing PID (roughly `p > 1.75 GeV, θ < 20°`, sector 4 — reconfirm current RICH acceptance with Maria before drawing acceptance boundaries), extract the kaon-contamination number two ways on the same tracks: (a) from the MC-based ML pipeline the classifier provides, and (b) from RICH particle ID directly, using the RICH tags as near-truth-level PID. Compare bin by bin. This is the primary cross-check because RICH in its acceptance gives PID that is close to truth-level; disagreement between the ML estimate and the RICH estimate is a real result and drives Week 9's framing.
+- **Secondary validation: exclusive missing-mass.** On the exclusive-channel ntuple, form `M_X(e p K)` and study the distribution. The missing-mass structure lets Cooper estimate (a) the true number of pions in the accepted sample (the events that populate the wrong-mass regions of the M_X spectrum under the K hypothesis are consistent with pion contamination) and (b) the number of pions mis-ID'd as K by the classifier. Note the asymmetry explicitly in the writeup: missing-mass informs only on **pion** contamination, not on proton contamination and not on K efficiency. It is a secondary cross-check to RICH, not a substitute.
 
 **Maria's tasks.**
-- Review the ML-vs-baseline contamination plot. This is the primary deliverable — it needs to be right.
-- Review report draft Sections 1-4 by mid-week. Return written comments.
-- Review poster draft Friday. Return comments by Sunday.
+- Confirm the exclusive-channel Groovy strategy Monday (fork vs extend) so Cooper is not blocked on the data-production prerequisite.
+- Reconfirm current RICH acceptance boundaries and PID-tag conventions (`best_PID`, `RQ`, `N_photons` thresholds) before Cooper draws the RICH-overlap cross-check bins.
+- Sign off on the Part-2 final model decision before Part 3 begins. This is the D6/D7 decision consolidation.
+- Mid-week check-in on the RICH cross-check preliminary numbers.
 
 **Done when.**
-- ML-vs-baseline contamination plot (with missing-mass method and RICH cross-check) in `/figures/contam_ml_vs_baseline.png`.
-- Report draft v1 in `/report/report_v1.md`.
-- Poster draft v1.
+- MLPs trained for all three formulations; head-to-head BDT-vs-MLP comparison tables in `notes/cooper_week8_model_comparison.md`.
+- Final model decision written and signed off; `model_final.joblib` committed under `/work/`.
+- Exclusive-channel ntuple `data_exclusive_v01/` produced; event count and file count documented.
+- `apply_bdt` run on SIDIS-inclusive channel; per-(p, θ)-bin ML-vs-baseline contamination table and plot committed.
+- `apply_bdt` run on exclusive channel; RICH-overlap cross-check plot (ML contamination estimate vs RICH-derived estimate, bin by bin in the RICH acceptance) committed as the week's primary validation figure.
+- Exclusive missing-mass distribution `M_X(e p K)` plot with the pion-contamination reading committed as the secondary cross-check.
 
 **Risks / dependencies.**
-- ML-vs-missing-mass method disagree in some bins. Severity M. Mitigation: report honestly. If the ML reduces contamination relative to baseline but the missing-mass method and MC-truth disagree on the absolute level, that is a systematic uncertainty, not a failure. Quote the spread.
-- RICH coverage is narrow (sector 4, limited p-theta bins). Severity L (expected). Mitigation: present what's available. RICH is a cross-check, not the primary result.
+- Exclusive-channel Groovy extension breaks the data-production pipeline or takes longer than Monday. Severity M–H. Mitigation: start Monday morning, not mid-week. If the extension is stuck by Tuesday, fall back to filtering the exclusive channel out of the existing `data_v01/` ntuple in post-processing — cuts on proton kinematics after the fact rather than at the Groovy stage. This is worse (larger intermediate files, weaker cuts) but unblocks Part 3.
+- RICH acceptance in the current data is narrower than expected and the overlap sample is statistics-starved. Severity M. Mitigation: report the bins where the comparison is statistically meaningful; do not stretch the RICH cross-check into bins where the RICH sample is < ~100 tracks. If the RICH overlap is too thin to be a primary validation, the exclusive missing-mass cross-check becomes the primary and RICH degrades to sanity check — flag this to Maria immediately, do not paper over.
+- Final model decision is genuinely close between BDT and MLP, or between binary and 3-class. Severity L. Mitigation: this is a real answer; pick the simpler formulation (binary BDT) unless one of the alternatives shows a decisive per-bin advantage. Document the closeness rather than manufacturing a false decisiveness.
+- ML-vs-RICH comparison disagrees. Severity M–H. Mitigation: this is real physics — one of the two is missing something. Investigate honestly: is the MC training distribution wrong in the RICH region? Is the RICH tag selection contaminated by mis-tagged tracks? Document both possibilities and do not silently prefer one.
 
-**Fallback / scope-down.** If the RICH cross-check is incomplete by Wednesday, drop it. Missing-mass method + MC-truth + ML is sufficient for the report and poster.
+**Fallback / scope-down.** If Part 3 slips, ship the SIDIS-inclusive `apply_bdt` numbers and the RICH cross-check (in whatever RICH-acceptance bins are populated); defer the exclusive missing-mass cross-check to Week 9. If the exclusive-channel ntuple is not producible this week at all, both the missing-mass cross-check and part of the RICH work (which uses the same exclusive selection to reduce combinatorics) slip to Week 9 and the SIDIS-inclusive numbers become the sole data-side deliverable for Week 8.
+
+---
+
+### Week 9 — Deep-dive validation of the W8 data pass; poster-plot finalization
+
+**Theme.** Two threads in parallel, both refinement rather than first-pass. The W8 apply-to-data run produced the first numbers on both channels along with a first RICH-overlap cross-check and a first exclusive missing-mass reading. Week 9 sharpens those into defensible, publication-quality results: the RICH-vs-MC contamination comparison in the RICH-acceptance region gets its full systematic treatment as the primary validation, and the exclusive-channel missing-mass cross-check gets its full treatment as the secondary. In parallel, every plot destined for the CEU (or equivalent) poster is finalized this week — style, axes, labels, legends, colors, sizing. Treat plot finalization as its own workstream, not a Friday-afternoon cleanup pass on top of the analysis refinement. The two threads share Cooper's week but do not share deadlines: analysis refinement is signed off mid-week, plots are signed off by Friday.
+
+No new model training this week. No new data production. The final model was locked in W8 Part 2; the exclusive-channel ntuple is locked coming into W9. If either shows a defect discovered during refinement, document it and quote the effect on the number — do not retrain and do not reprocess.
+
+**Cooper's tasks.**
+
+*Thread 1 — refine the primary validation (RICH-vs-MC contamination in the RICH-acceptance region).*
+- Take the W8 first-pass RICH-overlap plot as the starting point. Redraw the RICH-acceptance boundary explicitly: confirm sector 4, `p > 1.75 GeV, θ < 20°` (or whatever Maria reconfirmed at W8 start), and shade the acceptance region on the (p, θ) map so the reader sees exactly which bins the comparison covers and which are extrapolation.
+- Build the coverage plot: per-(p, θ)-bin RICH-tagged track counts inside the acceptance, with the < ~100-track floor from W8 marked as an exclusion. Any bin below the floor drops out of the headline comparison and is called out separately as statistics-starved. Do not carry statistics-starved bins into the headline number.
+- Full systematic uncertainty treatment on the ML contamination estimate in the RICH-acceptance region. Sources at minimum: (a) per-bin MC statistical uncertainty from the training/test split; (b) sensitivity to the per-bin threshold choice — vary the threshold by ± one grid step and re-quote; (c) sensitivity to the calibration — quote the number with and without Platt calibration; (d) if the (p, θ) reweighting debt from W5 is still un-resolved (see W7 risks), quote the sensitivity to including / excluding the reweighting. Systematic on the RICH-derived contamination side: (e) RICH tag purity — vary `RQ` and `N_photons` thresholds around Maria's nominal and quote the drift.
+- Agreement / disagreement diagnosis, bin by bin. For every acceptance bin above the stats floor, compute `Δ = C_ML − C_RICH` and its combined uncertainty. Classify each bin as (i) agrees within uncertainty, (ii) disagrees but the disagreement points at a specific source (training MC mismodels the RICH region, RICH tag contaminated by mis-tagged tracks, per-bin threshold under- or over-tuned), or (iii) disagrees and the source is unclear. Write the diagnosis into `notes/cooper_week9_rich_diagnosis.md` bin by bin — no averaging until every disagreeing bin has been named.
+- Produce the final headline RICH-vs-MC contamination plot: contamination-per-bin for {ML, RICH-derived} with combined error bars, acceptance boundary shaded, excluded bins greyed out. This is the primary validation figure for the report and the poster.
+
+*Thread 2 — refine the secondary validation (exclusive missing-mass cross-check on `ep → epKX`).*
+- Take the W8 first-pass `M_X(e p K)` distribution as the starting point. Refine the fit or sideband definition used to read off (a) the true π count in the accepted sample and (b) the π-mis-ID-as-K count from the classifier. Full systematics: vary the sideband boundaries, vary the fit function if a fit is used, quote the reader-region sensitivity. Same discipline as Thread 1 — the number is only as defensible as its systematic band.
+- Re-state the asymmetry that was flagged in W8 explicitly in the writeup: the missing-mass cross-check constrains **pion** contamination only, not proton contamination and not kaon efficiency. This constraint is what makes it a secondary rather than primary validation. Do not let poster reviewers read the plot as a full validation of the ML result.
+- Reconcile the missing-mass π-contamination number with the RICH-derived number from Thread 1 in the (p, θ) region where both are populated. If they agree, that is the two-way cross-check the report leans on. If they disagree, that is a real result and joins the Thread-1 disagreement diagnosis rather than being buried.
+- Produce the final `M_X(e p K)` plot with the reader region marked and the pion-contamination number annotated on the figure.
+
+*Thread 3 — finalize every poster plot.*
+- Enumerate every plot destined for the CEU (or equivalent) poster in a checklist at the top of `notes/cooper_week9_poster_plots.md`. Candidates at minimum: the headline contamination-vs-(p, θ) figure (ML vs baseline on the locked model), the RICH-vs-MC comparison from Thread 1, the exclusive missing-mass `M_X(e p K)` plot from Thread 2, the tier-comparison summary from W5, the per-bin FOM-threshold sweep example, and any feature-importance or reliability figure Maria wants on the poster.
+- For each plot, run the finalization pass: consistent axis label conventions (units, symbols), consistent legend placement, consistent color mapping across figures (baseline is always one color, ML always another, RICH always a third — pick once, apply everywhere), font size legible at poster print scale (rule of thumb: axis labels ≥ 14 pt after scaling), and a size / aspect that fits the poster grid Maria specifies. Save the final versions under `/figures/poster/` with names that make the poster-slot assignment obvious.
+- Print-test the poster-scale figures at least once mid-week on the largest display Cooper has access to. Screen-shrunk PNGs that read fine on a laptop routinely fall apart at poster scale — catch this Wednesday, not the night before submission.
+
+**Maria's tasks.**
+- Reconfirm the RICH-acceptance boundary at Monday's start, before Cooper draws Thread-1 systematic bands on a moving target.
+- Sign off on the RICH-vs-MC disagreement diagnosis (Thread 1) mid-week before Cooper commits to the final systematic band. Bins classified as "disagrees, source unclear" need Maria's read before they are quoted in the report.
+- Confirm the poster plot list (Thread 3) at the start of the week so Cooper is not finalizing plots that end up cut from the layout.
+- Review the finalized poster plots by end-of-day Friday. Comments on style / labeling come Friday, not the following week — Week 10 is polish and submission, not another round of plot revision.
+
+**Done when.**
+- `notes/cooper_week9_rich_diagnosis.md` written, with per-bin agreement / disagreement classification and named sources for every disagreeing bin.
+- Final RICH-vs-MC contamination plot in `/figures/rich_vs_mc_final.png` with acceptance shaded, excluded bins greyed, combined error bars.
+- Final exclusive missing-mass `M_X(e p K)` plot in `/figures/mx_epk_final.png` with reader region marked and π-contamination number annotated.
+- Reconciliation between the RICH-derived and missing-mass-derived π-contamination numbers documented in the diagnosis note.
+- `notes/cooper_week9_poster_plots.md` checklist complete; every listed plot has a finalized version under `/figures/poster/`.
+- Mid-week print-test of poster-scale figures performed and any layout / legibility issues logged.
+
+**Risks / dependencies.**
+- RICH-vs-MC disagreement is large in more than a couple of bins and the sources are unclear. Severity M–H. Mitigation: this is the same honesty rule as W8 — the disagreement is a finding, not a failure. If diagnosis stalls, quote the disagreement as a systematic uncertainty on the ML result rather than manufacturing a false agreement. Maria decides mid-week whether unresolved disagreement gets its own section in the report.
+- Systematic uncertainty treatment on the ML side balloons into a Week-long rabbit hole. Severity M. Mitigation: the five sources listed in Thread 1 are the scope; additional sources are noted as future work in the writeup rather than pursued this week. If (p, θ) reweighting was never resolved upstream, quote the sensitivity band and stop — do not turn W9 into a reweighting rescue.
+- Poster plots proliferate beyond what fits the layout. Severity L. Mitigation: Maria's Monday confirmation of the plot list is the scope gate. New plots after Monday require an explicit swap-out, not an addition.
+- The exclusive missing-mass cross-check produces a number inconsistent with the RICH cross-check in the shared (p, θ) region. Severity M. Mitigation: this joins the Thread-1 disagreement diagnosis and is documented, not resolved by picking one number over the other.
+
+**Fallback / scope-down.** If Thread 1 systematics stall, ship the RICH-vs-MC plot with the statistical-only error bars and a documented list of un-quantified systematics; the primary-validation claim degrades to "consistent within stats" rather than "consistent within full systematics." If Thread 3 slips, prioritize the headline contamination plot, the RICH-vs-MC plot, and the missing-mass plot; everything else on the poster can be finalized early Week 10. Do not drop either the RICH or the missing-mass cross-check — they are the primary and secondary validations of the whole result, not scope-down candidates.
 
 ---
 
@@ -524,11 +574,11 @@ The `week4-tier-flexible` branch decouples dataset schema from training features
 |---|---|---|---|---|
 | D1 | Confirm Cooper's ifarm paths to clasdis MC and RGA pass-2 data | Week 1 Day 1 | Maria + Cooper | All processing work, all weeks |
 | D2 | RICH bank present and non-empty on clasdis MC | Week 1 Day 2 | Cooper (verification) | Whether RICH cross-checks are available at all |
-| D3 | Hyperon-tagged kaon-truth channel (e' K+ Lambda, e' K+ Sigma0, both, or skip) | Week 3 | Maria | Week 8-9 cross-checks, scope of "independent kaon-truth tag" |
+| D3 | Hyperon-tagged kaon-truth channel (e' K+ Lambda, e' K+ Sigma0, both, or skip) | Week 3 | Maria | Off critical path: W8/W9 validation is RICH-overlap + exclusive missing-mass. If used, hyperon-tag is a supplementary sanity check only; skip is defensible. |
 | D4 | Extend `processing_three_particles` with ToF/calo per-hadron features, or postpone | Week 3 | Maria | Strength of per-hadron PID features in analysis-channel ntuple; Week 5 evaluation |
 | D5 | (p, theta) bin edges | Week 2 | Maria | All contamination tables and plots |
-| D6 | Final model family (BDT / MLP) for the production result | Week 6 | Maria + Cooper | Pipeline freeze, all later evaluation |
-| D7 | Calibration method (Platt, isotonic, or both) for the production result | Week 6-7 | Maria | Final model deliverable |
+| D6 | Final model family (BDT / MLP) and formulation (binary vs 3-class) for the production result | Week 8 | Maria + Cooper | Pipeline freeze, W8 Part 3 data application, W9 validation |
+| D7 | Calibration method (Platt, isotonic, or both) for the production result | Week 8 | Maria | Final model deliverable; folded into the W8 Part 2 sign-off with D6 |
 
 ---
 
@@ -536,7 +586,7 @@ The `week4-tier-flexible` branch decouples dataset schema from training features
 
 | # | Risk | Sev | Mitigation | Fallback |
 |---|---|---|---|---|
-| R1 | `RICH::Particle` bank empty on clasdis MC | H | Cooper verifies Day 2 with `hipo-utils -dump`. If empty, RICH cross-check moves from MC to data-only; the 14 RICH variables are not in the MC training ntuple (no big loss, they're not in features anyway). | Drop RICH as a sanity comparison on MC. RICH still used on data as a cross-check in Week 9 where sector-4 coverage exists. |
+| R1 | `RICH::Particle` bank empty on clasdis MC | H | Cooper verifies Day 2 with `hipo-utils -dump`. If empty, RICH cross-check moves from MC to data-only; the 14 RICH variables are not in the MC training ntuple (no big loss, they're not in features anyway). | Drop RICH as a sanity comparison on MC. RICH remains the primary data-side validation in Week 8 (first pass in the RICH-acceptance region) and Week 9 (refined with full systematic band). |
 | R2 | Cooper's ifarm access delayed | H | Maria pushes JLab IT pre-arrival. Backup laptop environment with local copy of one HIPO file for offline work. | Cooper does Python and reading work in Week 1, full pipeline catches up Week 2. |
 | R3 | Training MC statistics insufficient at high p (>3 GeV) where contamination is worst | M-H | Use full `clasdis` inbending sample. Quote MC stat uncertainty per bin. | If high-p bins are still stat-limited, merge bins. Honest binning at the cost of resolution. |
 | R4 | Missing-mass method and MC-truth disagree beyond systematics | M | Investigate honestly: does the data have a contamination the MC doesn't capture? Is the sideband subtraction biased? | The disagreement is a finding. Report it. Quote it as a systematic uncertainty rather than papering over it. |
@@ -550,13 +600,13 @@ The `week4-tier-flexible` branch decouples dataset schema from training features
 
 If behind schedule at Week 5, drop in this order:
 
-1. **Drop MLP.** Keep BDT only. (Saves ~3 days in Week 6.)
+1. **Drop MLP.** Keep BDT only. (Saves ~2–3 days in Week 8; the final model decision collapses to BDT-only across formulations.)
 2. **Drop isotonic calibration**, keep only Platt (sigmoid) calibration. (Saves ~1 day.)
 3. **Drop per-(p, theta)-bin threshold optimization.** Use a single global threshold chosen on the validation set. (Saves ~2 days in Week 5.)
-4. **Drop the analysis-channel ntuple extension for ToF/calo per-hadron variables** if not done by Week 6. Use existing `processing_mc_three_particles.groovy` output without ToF/calo per-hadron features. Apply the ML classifier to candidate K+ tracks using their kinematics + a join back to the training ntuple's per-track features.
+4. **Drop the analysis-channel ntuple extension for ToF/calo per-hadron variables** if not done by Week 7. Use existing `processing_mc_three_particles.groovy` output without ToF/calo per-hadron features. Apply the ML classifier to candidate K+ tracks using their kinematics + a join back to the training ntuple's per-track features.
 5. **Drop the hyperon-tagged kaon-truth cross-channel** (whichever was picked in D3). Rely on MC truth + missing-mass method for the kaon-truth side.
 6. **Drop feature ablation studies.** Keep hyperparameter tuning only. Feature importance plot alone is sufficient for the report.
-7. **Drop the RICH cross-check in Week 9.** Missing-mass method + MC-truth + ML is the complete story.
+7. **Collapse the W7/W8 model matrix to binary K⁺ vs non-K⁺ only.** Drop the 3-class formulation (K⁺/π⁺/p) from both the Week-7 BDT training and the Week-8 MLP training. Keeps the binary current-p-range and binary full-p-range models; drops the two multiclass models. (Saves ~1–2 days in Week 7 and ~1 day in Week 8.) Do **not** drop the RICH cross-check — it is the primary data-side validation in W8/W9 and cannot be scoped down without gutting the result.
 
 Do not drop: the headline improvement number, the report, the poster. These are the contractual SULI deliverables.
 
