@@ -59,7 +59,7 @@ ARRAY_IDX="${SLURM_ARRAY_TASK_ID:-0}"
 
 # ── Resolve repo root ─────────────────────────────────────────────────────────
 # Script lives at: $REPO_ROOT/suli2026_pid/slurm/_pid_training_array.sh
-# REPO_ROOT is the ~/CLAS/SULI/ parent that contains both suli2026_pid/ and
+# REPO_ROOT is the sibling-parent directory that contains both suli2026_pid/ and
 # clas12_analysis_software/ as siblings.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
