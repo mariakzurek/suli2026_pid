@@ -11,6 +11,7 @@ import matplotlib.colors as mcolors
 import numpy as np
 import pandas as pd
 import json
+import math
 
 
 import sys
@@ -20,7 +21,9 @@ from pathlib import Path
 
 
 ##############################################################################################################
-#   PLEASE READ
+#
+#   READ ME
+#
 #   This script does not do anything on it's own, it is a list of functions that are useful in analysis
 #   to use these functions do "from functions.py import [name of desired function]" When performing you're imports
 # 
@@ -29,41 +32,57 @@ from pathlib import Path
 #         -functions to automatically create bins on data
 #         -function that will apply basic SIDIS analysis cuts
 #         -function that will overlay plots
-#         -
+#         -function tat Load BDT ML model and adds score to df
 #
 #
-#   PLANNED
-#        -function to Load BDT ML model
-#        -function to make df have the ML BDT Classifier "score" variable
 #        
 #
 #
 ##############################################################################################################
 
-def compute_contamination(df, pid=None):              
-    #Computes the contamnation from an input df, optionally set pid to see a specific particle's contribution
-    r=0
-    rErr=0
-    if pid==None:
-        temp=df[df["pid"]==321]
-        a= (temp["mc_matching_pid"]!=321).sum()
-        b= temp["pid"].sum()
-        r=0
-        rErr=99
-        if b!=0:
-            r=a/b
-        if a!=0:
-            rErr = r*math.sqrt((1/a)+(1/b))
+
+def compute_contamination(df, pid=None):
+    """
+    Computes contamination among reconstructed K+ candidates.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Input dataframe.
+    pid : int or None, optional
+        If None, computes total contamination
+        (all non-321 truth particles reconstructed as K+).
+        Otherwise computes the contamination contribution
+        from the specified MC PID.
+
+    Returns
+    -------
+    r : float
+        Contamination fraction.
+    rErr : float
+        Statistical uncertainty.
+    """
+
+    temp = df[df["pid"] == 321]
+
+    if pid is None:
+        # Total contamination
+        a = (temp["mc_matching_pid"] != 321).sum()
     else:
-        temp=df[df["pid"]==321]
-        a= (temp["mc_matching_pid"]==pid).sum()
-        b= (temp["pid"]).sum()
-        r=0
-        rErr=99
-        if b!=0:
-            r=a/b
-        if a!=0:
-            rErr = r*math.sqrt((1/a)+(1/b))
+        # Contribution from one particle species
+        a = (temp["mc_matching_pid"] == pid).sum()
+
+    b = len(temp)
+
+    r = 0.0
+    rErr = 99.0
+
+    if b != 0:
+        r = a / b
+
+    if a != 0:
+        rErr = r * math.sqrt((1 / a) + (1 / b))
+
     return r, rErr
 
 def compute_purity(df):
@@ -79,14 +98,14 @@ def compute_purity(df):
         rErr = r*math.sqrt((1/a)+(1/b))
     return r, rErr
 
-def compute_efficiency(df, cut, raw):
+def compute_efficiency(df, cut, raw=False):
     #Will compute efficiency, raw gives the raw, uncut efficiency (PID efficiency)
     #while cut a cut you want to test the efficiency of (must be masked cut)
     if not raw:
         temp = df[df["pid"]==321]
     else:
         temp=df
-    up=temp[cut]
+    up = temp[cut]
     a= (up["mc_matching_pid"]==321).sum()
     b= (temp["mc_matching_pid"]==321).sum()
     r=0
@@ -145,12 +164,23 @@ def apply_Sidis_Cuts(df):
         ((baseline["pid"]==2212)&(baseline["Mx_epX"]>1))]
     return baseline
 
-def overlayPlots(ax, plots, labels):
 
+
+
+
+
+
+def overlayPlots(ax, plots, labels):
+    #Puts several plots on top of each other
     for obj, label in zip(plots, labels):
         obj.set_label(label)
 
     ax.legend()
+
+
+
+
+
 
 
 import joblib
@@ -158,8 +188,15 @@ import json
 import pathlib
 import numpy as np
 
-def load_model_and_data(model_path, df):
 
+
+
+
+
+
+
+def load_model_and_data(model_path, df):
+    
     # -------------------------------------------------
     # 1. LOAD MODEL
     # -------------------------------------------------
@@ -200,5 +237,53 @@ def load_model_and_data(model_path, df):
     df["score"] = scores
 
     return model, df
+
+
+def get_feature_names(model_path):
+    """
+    Extract feature names from a saved model or manifest.
+    Does NOT load or use any dataframe.
+    """
+
+    print(f"Reading model metadata: {model_path}")
+
+    model_obj = joblib.load(str(model_path))
+
+    # -------------------------------------------------
+    # Wrapped model case
+    # -------------------------------------------------
+    if isinstance(model_obj, dict) and "model" in model_obj:
+        feature_names = model_obj["features"]
+        print(f"Wrapped model: {len(feature_names)} features")
+
+    # -------------------------------------------------
+    # Legacy model + manifest case
+    # -------------------------------------------------
+    else:
+        manifest_path = pathlib.Path(model_path).resolve().parents[0] / "manifest.json"
+
+        if not manifest_path.exists():
+            raise FileNotFoundError(f"Missing manifest.json at {manifest_path}")
+
+        with open(manifest_path, "r") as f:
+            manifest = json.load(f)
+
+        feature_names = manifest.get("feature_list") or manifest.get("columns")
+
+        if feature_names is None:
+            raise ValueError("manifest.json missing feature_list/columns")
+
+        print(f"Legacy model: {len(feature_names)} features")
+
+    return feature_names
+
+def apply_model_to_df(model, df, feature_names):
+
+    X = df.loc[:, feature_names].values.astype(np.float32, copy=False)
+
+    scores = model.predict_proba(X)[:, 1]
+
+    df["score"] = scores
+    return df
 
 
