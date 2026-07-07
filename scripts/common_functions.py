@@ -16,7 +16,7 @@ import math
 
 import sys
 from pathlib import Path
-
+from baseline_chi2pid import passes_kplus_chi2pid_cut
 
 
 
@@ -196,6 +196,7 @@ import numpy as np
 
 
 def load_model_and_data(model_path, df):
+    #Loads a model using a path and dataframe. It will return the model obejct and the input dataframe with the scores column
     
     # -------------------------------------------------
     # 1. LOAD MODEL
@@ -278,6 +279,7 @@ def get_feature_names(model_path):
     return feature_names
 
 def apply_model_to_df(model, df, feature_names):
+    #adds the scores column to a dataframe.
 
     X = df.loc[:, feature_names].values.astype(np.float32, copy=False)
 
@@ -287,3 +289,283 @@ def apply_model_to_df(model, df, feature_names):
     return df
 
 
+def optimizeFOM(model_df, tBinEdges, pBinEdges, outputCSV=None, deviation=0):
+    #This program will find the FOM optimization of the threshold, you can optionally tell it to save as a CSV, but it will also return things as a dataframe, the deviation means that it will take the highest BDT threshold that is within that deviation so deviation 0.01 tells it to take the highest threshold such that FOM> 99% of Max FOM, useful for if the FOM versus BDT threshold plateus.
+    
+    if not (0 <= deviation < 1):
+        raise ValueError("deviation must satisfy 0 <= deviation < 1.")
+
+    thresholds = np.linspace(0.0, 0.95, 100)
+    results = []
+
+    thetaBins = makeBins(
+        df=model_df,
+        variable="theta",
+        binEdges=tBinEdges
+    )
+
+    for i in range(len(thetaBins)):
+
+        pBins = makeBins(
+            df=thetaBins[i],
+            variable="p",
+            binEdges=pBinEdges
+        )
+
+        for j in range(len(pBins)):
+
+            df_bin = pBins[j]
+
+            if len(df_bin) == 0:
+                continue
+
+            mc = df_bin["mc_matching_pid"].to_numpy()
+            scores = df_bin["score"].to_numpy()
+
+            is_K = (mc == 321)
+            is_pi = (mc == 211)
+
+            if np.sum(is_K) == 0:
+                continue
+
+            fom_values = []
+
+            # ---------------------------------------------
+            # Calculate FOM for every threshold
+            # ---------------------------------------------
+            for t in thresholds:
+
+                accepted = scores > t
+
+                N_K = np.sum(accepted & is_K)
+                N_pi = np.sum(accepted & is_pi)
+
+                denom = np.sqrt(N_K + N_pi)
+
+                if denom == 0:
+                    fom = 0.0
+                else:
+                    fom = N_K / denom
+
+                fom_values.append(fom)
+
+            fom_values = np.array(fom_values)
+
+            # ---------------------------------------------
+            # Choose optimal threshold
+            # ---------------------------------------------
+            max_fom = np.max(fom_values)
+
+            if deviation == 0:
+                # Original behavior: first threshold with max FOM
+                best_t = thresholds[np.argmax(fom_values)]
+            else:
+                tolerance = 1 - deviation
+
+                allowed_thresholds = thresholds[
+                    fom_values >= tolerance * max_fom
+                ]
+
+                if len(allowed_thresholds) > 0:
+                    # Highest threshold within allowed deviation
+                    best_t = allowed_thresholds[-1]
+                else:
+                    best_t = np.nan
+
+            results.append({
+                "thetaLow": tBinEdges[i],
+                "thetaHigh": tBinEdges[i + 1],
+                "pLow": pBinEdges[j],
+                "pHigh": pBinEdges[j + 1],
+                "best_threshold": best_t,
+                "best_fom": max_fom
+            })
+
+    results_df = pd.DataFrame(results)
+
+    if outputCSV is not None:
+        from pathlib import Path
+        output_path = Path(outputCSV)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        results_df.to_csv(output_path, index=False)
+    return results_df
+
+
+def apply_optimized_bdt_cut(df, threshold_df=None, CSVPath=None):
+    """
+    Apply optimized BDT thresholds to a dataframe.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Dataframe containing 'p', 'theta', and 'score'.
+
+    threshold_df : pandas.DataFrame, optional
+        DataFrame containing optimized thresholds.
+
+    CSVPath : str or Path, optional
+        Path to a CSV containing optimized thresholds. Used if
+        threshold_df is not provided.
+
+    Returns
+    -------
+    numpy.ndarray
+        Boolean mask indicating which events pass the optimized cut.
+    """
+
+    # Load thresholds from CSV if needed
+    if threshold_df is None:
+        if CSVPath is None:
+            raise ValueError("Either threshold_df or CSVPath must be provided.")
+
+        threshold_df = pd.read_csv(Path(CSVPath))
+
+    p = df["p"].to_numpy()
+    theta = df["theta"].to_numpy()
+    score = df["score"].to_numpy()
+
+    pass_bdt = np.zeros(len(df), dtype=bool)
+
+    for _, row in threshold_df.iterrows():
+
+        if np.isnan(row["best_threshold"]):
+            continue
+
+        bin_mask = (
+            (p >= row["pLow"]) & (p < row["pHigh"]) &
+            (theta >= row["thetaLow"]) & (theta < row["thetaHigh"])
+        )
+
+        pass_bdt |= bin_mask & (score > row["best_threshold"])
+
+    return pass_bdt
+
+
+
+
+#################################################################################################3
+#THESE ARE FOR MATCHING BASELINE EFFICIENCIES
+
+
+def computeEffChiPID(df, pBinEdges): #Standalone function for doing the efficiency using the baseline chi2pid cut
+    import numpy as np
+
+    # -------------------------------------------------
+    # keep only valid MC-matched tracks
+    # -------------------------------------------------
+    df = df[df["mc_matching_pid"] != -9999].copy()
+
+    eff = []
+
+    for i in range(len(pBinEdges) - 1):
+
+        p_lo = pBinEdges[i]
+        p_hi = pBinEdges[i + 1]
+
+        binp = df[
+            (df["p"] >= p_lo) &
+            (df["p"] < p_hi)
+        ]
+
+        if len(binp) == 0:
+            eff.append(np.nan)
+            continue
+
+        # -------------------------------------------------
+        # TRUE K+ (DENOMINATOR)
+        # -------------------------------------------------
+        true_k = (binp["mc_matching_pid"] == 321)
+        n_true_k = np.sum(true_k)
+
+        if n_true_k == 0:
+            eff.append(np.nan)
+            continue
+
+        # -------------------------------------------------
+        # χ²PID CUT
+        # -------------------------------------------------
+        chi2_mask = passes_kplus_chi2pid_cut(
+            binp["chi2pid"].to_numpy(),
+            binp["p"].to_numpy()
+        )
+
+        # -------------------------------------------------
+        # NUMERATOR:
+        # true K+ that pass χ²PID and are reconstructed as K+
+        # -------------------------------------------------
+        reconstructed_k = (binp["pid"] == 321)
+
+        passed = chi2_mask & reconstructed_k.to_numpy() & true_k.to_numpy()
+
+        eff.append(np.sum(passed) / n_true_k)
+
+    return np.array(eff, dtype=float)
+
+def MatchEfficiency(df, pBinEdges):    #This is a BDT cut that Matches th efficiency of the chi2pid baseline method
+    import numpy as np
+
+    # Remove unmatched particles
+    df = df[df["mc_matching_pid"] != -9999].copy()
+
+    # Target χ²PID efficiencies
+    effs = computeEffChiPID(df, pBinEdges)
+
+    thresholds_out = []
+    pass_bdt = np.zeros(len(df), dtype=bool)
+
+    scores = df["score"].to_numpy()
+    p = df["p"].to_numpy()
+
+    for i in range(len(pBinEdges) - 1):
+
+        if np.isnan(effs[i]):
+            thresholds_out.append(np.nan)
+            continue
+
+        p_lo = pBinEdges[i]
+        p_hi = pBinEdges[i + 1]
+
+        bin_mask = (p >= p_lo) & (p < p_hi)
+
+        if np.sum(bin_mask) == 0:
+            thresholds_out.append(np.nan)
+            continue
+
+        binp = df.loc[bin_mask]
+
+        true_k = (binp["mc_matching_pid"] == 321).to_numpy()
+        n_true_k = np.sum(true_k)
+
+        if n_true_k == 0:
+            thresholds_out.append(np.nan)
+            continue
+
+        bin_scores = binp["score"].to_numpy()
+        target_eff = effs[i]
+
+        thresholds = np.linspace(0.01, 0.99, 200)
+
+        best_t = np.nan
+        best_diff = np.inf
+
+        for t in thresholds:
+
+            accepted = bin_scores > t
+            eff = np.sum(accepted & true_k) / n_true_k
+
+            diff = abs(eff - target_eff)
+
+            if diff < best_diff:
+                best_diff = diff
+                best_t = t
+
+        thresholds_out.append(best_t)
+
+        # Apply threshold to all events in this momentum bin
+        if not np.isnan(best_t):
+            pass_bdt[bin_mask] = scores[bin_mask] > best_t
+
+    return np.array(thresholds_out), pass_bdt
+
+
+    
