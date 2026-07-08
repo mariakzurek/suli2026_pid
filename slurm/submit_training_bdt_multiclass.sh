@@ -64,7 +64,7 @@ if [ -z "${FEATURES_FILE}" ]; then
     echo "ERROR: --features-file is required" >&2
     echo "" >&2
     echo "Example:" >&2
-    echo "  ./slurm/submit_training_bdt_multiclass.sh \\" >&2
+    echo "./slurm/submit_training_bdt_multiclass.sh \\" >&2
     echo "      --features-file scripts/training/features_tier1.txt" >&2
     exit 1
 fi

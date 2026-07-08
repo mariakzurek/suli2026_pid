@@ -476,7 +476,9 @@ def train_bdt(
     n_train_full = len(X_full)
     n_val = len(X_val)
     print(f"  Train (full): {n_train_full:,} rows, Val: {n_val:,} rows")
-    print(f"  Train K fraction: {y_full.mean():.3f}, Val K fraction: {y_val.mean():.3f}")
+    #print(f"  Train K fraction: {y_full.mean():.3f}, Val K fraction: {y_val.mean():.3f}")
+    print(f"  Train class fractions: {np.bincount(y_full)/len(y_full)}")
+    print(f"  Val class fractions: {np.bincount(y_val)/len(y_val)}")
 
     # ── Calibration split ──────────────────────────────────────────────────────
     # Carve calibration slice from train only (stratified).
@@ -532,11 +534,12 @@ def train_bdt(
         learning_rate=0.05,
         max_depth=6,
         objective="multiclass",
-        num_class=3,
+        num_class=len(np.unique(y_full)),
         random_state=random_state,
         n_jobs=-1,
         verbose=1,
     )
+
     if lgb_kwargs:
         default_lgb.update(lgb_kwargs)
 
@@ -546,13 +549,22 @@ def train_bdt(
     print("  LightGBM fit complete.")
 
     # ── Pre-calibration scores ─────────────────────────────────────────────────
-    scores_train_uncal = clf.predict_proba(X_full)[:, 1]
-    scores_val_uncal = clf.predict_proba(X_val)[:, 1]
+    scores_train_uncal = clf.predict_proba(X_full)
+    scores_val_uncal = clf.predict_proba(X_val)
 
-    auc_train_uncal = roc_auc_score(y_full, scores_train_uncal)
-    auc_val_uncal = roc_auc_score(y_val, scores_val_uncal)
-    brier_val_uncal = brier_score_loss(y_val, scores_val_uncal)
-    logloss_val_uncal = log_loss(y_val, scores_val_uncal)
+    auc_train_uncal = roc_auc_score(
+        y_full,
+        scores_train_uncal,
+        multi_class="ovr",
+    )
+
+    auc_val_uncal = roc_auc_score(
+        y_val,
+        scores_val_uncal,
+        multi_class="ovr",
+    )
+    brier_val_uncal = np.nan
+    brier_val_cal = np.nan
     print(f"  Pre-cal AUC  train={auc_train_uncal:.4f}  val={auc_val_uncal:.4f}")
 
     # ── Platt calibration ──────────────────────────────────────────────────────
@@ -564,11 +576,21 @@ def train_bdt(
     print("  Calibration fit complete.")
 
     # ── Post-calibration scores ────────────────────────────────────────────────
-    scores_train_cal = calibrated_clf.predict_proba(X_full)[:, 1]
-    scores_val_cal = calibrated_clf.predict_proba(X_val)[:, 1]
+    scores_train_cal = calibrated_clf.predict_proba(X_full)
+    scores_val_cal = calibrated_clf.predict_proba(X_val)
 
-    auc_train_cal = roc_auc_score(y_full, scores_train_cal)
-    auc_val_cal = roc_auc_score(y_val, scores_val_cal)
+    auc_train_cal = roc_auc_score(
+        y_full,
+        scores_train_cal,
+        multi_class="ovr",
+    )
+
+    auc_val_cal = roc_auc_score(
+        y_val,
+        scores_val_cal,
+        multi_class="ovr",
+    )
+
     brier_val_cal = brier_score_loss(y_val, scores_val_cal)
     logloss_val_cal = log_loss(y_val, scores_val_cal)
     print(f"  Post-cal AUC train={auc_train_cal:.4f}  val={auc_val_cal:.4f}")
@@ -607,10 +629,11 @@ def train_bdt(
 
     # ── Plots ──────────────────────────────────────────────────────────────────
     print("Generating reliability diagram ...")
-    _plot_reliability_diagram(
-        y_val, scores_val_uncal, scores_val_cal,
-        outdir / "reliability_diagram.png",
-    )
+    #_plot_reliability_diagram(
+      #  y_val, scores_val_uncal, scores_val_cal,
+     #   outdir / "reliability_diagram.png",
+    #)
+    print("Skipping reliability diagram for multiclass model.")
 
     print("Generating ROC curve ...")
     _plot_roc(y_val, scores_val_cal, outdir / "roc_val.png")

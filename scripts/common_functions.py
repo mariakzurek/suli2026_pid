@@ -31,11 +31,11 @@ from baseline_chi2pid import passes_kplus_chi2pid_cut
 #         -functions to compute purity, contamination, efficiency, and Mis-ID
 #         -functions to automatically create bins on data
 #         -function that will apply basic SIDIS analysis cuts
-#         -function that will overlay plots
+#         -function that assist plotting
 #         -function tat Load BDT ML model and adds score to df
-#
-#
-#        
+#         -functions that apply threshold optimizations on feature of merit, additionally a function that applies this cut
+#         -functions that can get information on a model
+#         -functions used to apply a binary BDT cut that matches the efficiency of the baseline method (chi2pid)
 #
 #
 ##############################################################################################################
@@ -151,6 +151,12 @@ def makeBins(df, variable, binEdges=None, start=None, end=None, binNum=None):
             bins.append(binCut)
     return bins
 
+def makeBinEdges(start,end,bins):
+    #auto generates bin edges for uniform binning with a start,end, and bin number
+    binEdges = np.linspace(start, end, bins + 1)
+    return binEdges
+
+
 def apply_Sidis_Cuts(df):
     #Applies all Basic SIDIS Cuts used in analysis
     baseline=df[
@@ -166,19 +172,25 @@ def apply_Sidis_Cuts(df):
 
 
 
+##########################################################################################
 
 
 
 
-def overlayPlots(ax, plots, labels):
-    #Puts several plots on top of each other
-    for obj, label in zip(plots, labels):
-        obj.set_label(label)
+def add_plot(vals, errs, ax, label, center):
+    #returns ax with the plot of some values errors ect, useful for when wanting to make a comparison of two plots
+    ax.errorbar(
+        center,
+        vals,
+        yerr=errs,
+        marker="o",
+        capsize=3,
+        label=label,
+        linestyle="none"
+    )
+    return ax
 
-    ax.legend()
-
-
-
+    
 
 
 
@@ -191,9 +203,9 @@ import numpy as np
 
 
 
+##################################################################################################################################
 
-
-
+#These functions handel loading and using the functionality of the Binary BDT Classifier
 
 def load_model_and_data(model_path, df):
     #Loads a model using a path and dataframe. It will return the model obejct and the input dataframe with the scores column
@@ -568,4 +580,3 @@ def MatchEfficiency(df, pBinEdges):    #This is a BDT cut that Matches th effici
     return np.array(thresholds_out), pass_bdt
 
 
-    
