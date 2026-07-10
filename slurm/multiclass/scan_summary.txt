@@ -1,0 +1,12 @@
+Total files: 300
+Proton files: 300
+Non-proton files: 0
+
+train_m: 210 files
+val_m: 45 files
+test_m: 45 files
+
+Proton distribution:
+  train: 210
+  val:   45
+  test:  45

@@ -132,7 +132,6 @@ _ALWAYS_COLS = ["p", "theta", "phi", "vz", "sector", "chi2pid",
 PID_KPLUS  = 321
 PID_PIPLUS = 211
 PID_PROTON = 2212
-
 # Default columns-file, resolved relative to this script.
 _DEFAULT_COLUMNS_FILE = pathlib.Path(__file__).parent / "columns_maximal.txt"
 
@@ -257,6 +256,13 @@ def _load_root_file(root_path: pathlib.Path, branch_names: List[str]) -> pd.Data
 
         tree = f[tree_key]
         # filter_name= is the documented fast path (not expressions=).
+        #print("\nRequested branches:")
+        #print(branch_names)
+
+        #print(
+        #"mc_matching_pid requested:",
+        #"mc_matching_pid" in branch_names
+        #)
         arrays = tree.arrays(
             filter_name=branch_names,
             library="np",
@@ -264,6 +270,9 @@ def _load_root_file(root_path: pathlib.Path, branch_names: List[str]) -> pd.Data
 
     # Build DataFrame from numpy arrays — avoids uproot's pandas overhead.
     df = pd.DataFrame({name: arrays[name] for name in arrays})
+    if "mc_matching_pid" in df.columns:
+        print(root_path.name)
+        print(df["mc_matching_pid"].value_counts().head(10))
     return df
 
 
@@ -273,40 +282,39 @@ def _apply_selection_and_label(
     p_max: float,
 ) -> pd.DataFrame:
     """
-    Apply EB-K+ selection, momentum cut, and binary label assignment.
+    Apply EB-K+ selection (test only), momentum cut, and multiclass label
+    assignment.
 
     WHAT IT DOES
     ------------
-    For all splits: keeps pid==321 rows with p < p_max.
-    For train/val: additionally requires mc_matching_pid in {211, 321} and
-      assigns a non-nullable int8 label (1=K, 0=π).
-    For test: keeps all EB-K+ rows and assigns a nullable Int8 label
-      (1=K, 0=π, NA for protons/unmatched/other).
-
-    PITFALLS
-    --------
-    * The test set intentionally includes protons so evaluate.py can compute
-      C^{p→K}.  Do not filter protons out of the test split.
-    * train/val must NOT include the test-only nullable rows — the calibration
-      and training code expects clean binary labels with no NA.
+    For test: keeps pid==321 (EB-K+) rows with p < p_max.
+    For train/val: keeps all rows with p < p_max (no EB-PID prefilter), then
+      requires mc_matching_pid in {211, 321, 2212} and assigns a non-nullable
+      int8 label (0=π, 1=K, 2=proton).
+    For test: assigns a nullable Int8 label (0=π, 1=K, 2=proton, NA for
+      unmatched/other).
     """
-    # EB-K+ selection
-    df = df[df["pid"] == PID_KPLUS].copy()
+    if split_name == "test":
+        df = df[df["pid"] == PID_KPLUS].copy()
 
     # Momentum cap
     df = df[df["p"] < p_max]
 
     if split_name in ("train", "val"):
-        # Binary-labeled rows only
-        mask_binary = df["mc_matching_pid"].isin([PID_PIPLUS, PID_KPLUS])
-        df = df[mask_binary].copy()
-        df["label"] = (df["mc_matching_pid"] == PID_KPLUS).astype(np.int8)
+        mask_pid = df["mc_matching_pid"].isin(
+            [PID_PIPLUS, PID_KPLUS, PID_PROTON]
+        )
+        df = df[mask_pid].copy()
+        label_map = {PID_PIPLUS: 0, PID_KPLUS: 1, PID_PROTON: 2}
+        df["label"] = df["mc_matching_pid"].map(label_map).astype(np.int8)
     else:
-        # Test: nullable Int8 label
         label = pd.array(
             np.where(
-                df["mc_matching_pid"] == PID_KPLUS, 1,
-                np.where(df["mc_matching_pid"] == PID_PIPLUS, 0, pd.NA)
+                df["mc_matching_pid"] == PID_PIPLUS, 0,
+                np.where(
+                    df["mc_matching_pid"] == PID_KPLUS, 1,
+                    np.where(df["mc_matching_pid"] == PID_PROTON, 2, pd.NA)
+                )
             ),
             dtype="Int8",
         )
@@ -324,10 +332,11 @@ def _truth_breakdown(df: pd.DataFrame, split_name: str) -> dict:
     two classes used in training.
     """
     vc = df["mc_matching_pid"].value_counts().to_dict()
+    
     breakdown = {
         "labeled_K":    int(vc.get(PID_KPLUS, 0)),
         "labeled_pi":   int(vc.get(PID_PIPLUS, 0)),
-        "proton":       int(vc.get(2212, 0)),
+        "proton":       int(vc.get(PID_PROTON, 0)),
         "unmatched":    int(vc.get(SENTINEL, 0)),
         "other":        int(sum(v for k, v in vc.items()
                                 if k not in (PID_KPLUS, PID_PIPLUS, 2212, SENTINEL))),
@@ -511,12 +520,18 @@ def build_dataset(
             print(f"  [{split}] Loading {root_path.name} ...", end=" ", flush=True)
             try:
                 df_raw = _load_root_file(root_path, all_branches)
+                print("\nRAW mc_matching_pid counts:")
+                print(df_raw["mc_matching_pid"].value_counts().sort_index())
             except Exception as e:
                 print(f"ERROR: {e}", file=sys.stderr)
                 missing_stems.append(stem)
                 continue
 
             df_sel = _apply_selection_and_label(df_raw, split, p_max)
+            #print("\nAFTER LABEL mc_matching_pid counts:")
+            #print(df_sel["mc_matching_pid"].value_counts().sort_index())
+            #print("\nLABEL counts:")
+            #print(df_sel["label"].value_counts().sort_index())
             dfs.append(df_sel)
             print(f"{len(df_sel):,} rows after selection")
 
@@ -538,7 +553,9 @@ def build_dataset(
             )
 
         df_split = pd.concat(dfs, ignore_index=True)
+        print(df_split["mc_matching_pid"].unique()[:20])
         df_split = _enforce_schema(df_split, column_list_clean, split)
+        print(df_split["mc_matching_pid"].unique()[:20])
 
         # Write parquet with snappy compression.
         df_split.to_parquet(str(out_path), compression="snappy", index=False)
@@ -667,6 +684,17 @@ def _parse_args(argv=None):
 
 
 def main(argv=None):
+
+    # ────────────────────────────────────────────────────────────────
+    # Debug: inspect proton distribution in split ROOT files
+    # ────────────────────────────────────────────────────────────────
+    
+
+
+    # ────────────────────────────────────────────────────────────────
+    # Normal dataset building code
+    # ────────────────────────────────────────────────────────────────
+
     args = _parse_args(argv)
 
     # Handle deprecated --features-file flag.
@@ -677,48 +705,65 @@ def main(argv=None):
             "training feature selection is now done via train_bdt.py --features-file.",
             file=sys.stderr,
         )
-        # Only override columns_file if user did NOT also pass --columns-file explicitly.
-        # (If both are passed, --columns-file takes precedence and deprecated flag warns.)
+
         columns_file_path = pathlib.Path(args.features_file_deprecated)
+
     else:
         columns_file_path = pathlib.Path(args.columns_file)
 
-    # Expand $USER in mc_dir (useful when called from slurm env)
+
+    # Expand environment variables
     mc_dir = pathlib.Path(os.path.expandvars(args.mc_dir))
     split_dir = pathlib.Path(args.split_dir)
     outdir = pathlib.Path(args.outdir)
 
-    # ── Validate inputs ───────────────────────────────────────────────────────
+
+    # Validate columns file
     if not columns_file_path.exists():
         print(
             f"ERROR: --columns-file not found: {columns_file_path}\n"
-            f"       Default is scripts/training/columns_maximal.txt.\n"
-            f"       Run the Week-3 feature audit first and fill in the KEEP list.",
+            f"       Default is scripts/training/columns_maximal.txt.",
             file=sys.stderr,
         )
         sys.exit(1)
 
+
     column_list = _parse_columns_file(columns_file_path)
-    print(f"Columns loaded ({len(column_list)}) from {columns_file_path}: {column_list}")
+
+    print(
+        f"Columns loaded ({len(column_list)}) "
+        f"from {columns_file_path}"
+    )
+
 
     # Load split files
     split_lists: Dict[str, List[str]] = {}
+
     for split_name in ("train", "val", "test"):
+
         split_path = split_dir / f"{split_name}_files.txt"
+
         if not split_path.exists():
             print(
-                f"ERROR: Split file not found: {split_path}\n"
-                f"       Run the Phase-0 splitter (see notes/cooper_week4_walkthrough.md §3)",
+                f"ERROR: Split file not found: {split_path}",
                 file=sys.stderr,
             )
             sys.exit(1)
+
         stems = _parse_split_file(split_path)
+
         split_lists[split_name] = stems
-        print(f"  {split_name}: {len(stems)} stems from {split_path}")
+
+        print(
+            f"  {split_name}: {len(stems)} stems "
+            f"from {split_path}"
+        )
+
 
     print(f"MC directory: {mc_dir}")
     print(f"p_max: {args.p_max} GeV/c")
     print(f"Output: {outdir}")
+
 
     results = build_dataset(
         mc_dir=mc_dir,
@@ -731,10 +776,11 @@ def main(argv=None):
         overwrite=args.overwrite,
     )
 
+
     print("\nDone.")
-    print(f"  train  : {results['train']}")
-    print(f"  val    : {results['val']}")
-    print(f"  test   : {results['test']}")
+    print(f"  train   : {results['train']}")
+    print(f"  val     : {results['val']}")
+    print(f"  test    : {results['test']}")
     print(f"  manifest: {results['manifest']}")
 
 

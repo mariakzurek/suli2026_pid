@@ -273,40 +273,66 @@ def _apply_selection_and_label(
     p_max: float,
 ) -> pd.DataFrame:
     """
-    Apply EB-K+ selection, momentum cut, and binary label assignment.
+    Apply EB-K+ selection, momentum cut, and multiclass label assignment.
 
     WHAT IT DOES
     ------------
-    For all splits: keeps pid==321 rows with p < p_max.
-    For train/val: additionally requires mc_matching_pid in {211, 321} and
-      assigns a non-nullable int8 label (1=K, 0=π).
-    For test: keeps all EB-K+ rows and assigns a nullable Int8 label
-      (1=K, 0=π, NA for protons/unmatched/other).
+    For test: keeps pid==321 (EB-K+) rows with p < p_max.
+    For train/val: keeps all rows with p < p_max (no EB-PID prefilter), then
+      requires mc_matching_pid in {211, 321, 2212} and assigns a non-nullable
+      int8 label (0=π, 1=K, 2=proton).
+    For test: assigns a nullable Int8 label (0=π, 1=K, 2=proton, NA for
+      unmatched/other).
 
     PITFALLS
     --------
-    * The test set intentionally includes protons so evaluate.py can compute
-      C^{p→K}.  Do not filter protons out of the test split.
-    * train/val must NOT include the test-only nullable rows — the calibration
-      and training code expects clean binary labels with no NA.
+    * The test set intentionally scopes to EB-tagged K+ rows so evaluate.py
+      can compute C^{p->K}. Do not filter protons out of the test split.
+    * train/val must NOT be prefiltered on pid==PID_KPLUS — that was a
+      leftover from the binary π-vs-K setup and silently drops nearly all
+      true protons (EB rarely tags a proton as K+), leaving label==2 empty.
+    * train/val must NOT include the test-only nullable rows — the
+      calibration and training code expects clean labels with no NA.
     """
-    # EB-K+ selection
-    df = df[df["pid"] == PID_KPLUS].copy()
+    if split_name == "test":
+        # EB-K+ selection — test set intentionally scoped to EB-tagged
+        # candidates so evaluate.py can compute C^{p->K}.
+        df = df[df["pid"] == PID_KPLUS].copy()
 
     # Momentum cap
     df = df[df["p"] < p_max]
 
     if split_name in ("train", "val"):
-        # Binary-labeled rows only
-        mask_binary = df["mc_matching_pid"].isin([PID_PIPLUS, PID_KPLUS])
-        df = df[mask_binary].copy()
-        df["label"] = (df["mc_matching_pid"] == PID_KPLUS).astype(np.int8)
+        # Multiclass labels:
+        # 0 = pion
+        # 1 = kaon
+        # 2 = proton
+        mask_pid = df["mc_matching_pid"].isin(
+            [PID_PIPLUS, PID_KPLUS, PID_PROTON]
+        )
+        df = df[mask_pid].copy()
+        label_map = {
+            PID_PIPLUS: 0,
+            PID_KPLUS: 1,
+            PID_PROTON: 2,
+        }
+        df["label"] = (
+            df["mc_matching_pid"]
+            .map(label_map)
+            .astype(np.int8)
+        )
     else:
         # Test: nullable Int8 label
         label = pd.array(
             np.where(
-                df["mc_matching_pid"] == PID_KPLUS, 1,
-                np.where(df["mc_matching_pid"] == PID_PIPLUS, 0, pd.NA)
+                df["mc_matching_pid"] == PID_PIPLUS, 0,
+                np.where(
+                    df["mc_matching_pid"] == PID_KPLUS, 1,
+                    np.where(
+                        df["mc_matching_pid"] == PID_PROTON, 2,
+                        pd.NA
+                    )
+                )
             ),
             dtype="Int8",
         )
