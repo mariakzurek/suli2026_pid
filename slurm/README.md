@@ -19,6 +19,31 @@ files, not a single merged ROOT.
 
 ---
 
+## BDT scoring / apply (Week 6)
+
+Apply a trained model to a directory of ROOT files as a SLURM array job.
+
+```bash
+# Score all data_v01 files (bdt_score branch only):
+./slurm/submit_apply_bdt.sh \
+    --input-dir  /volatile/clas12/$USER/SULI/data_v01 \
+    --model      /work/clas12/$USER/SULI/models/tier1_v01/model.joblib \
+    --output-dir /volatile/clas12/$USER/SULI/scored_data_v01
+
+# With per-bin thresholds (adds bdt_pass branch):
+./slurm/submit_apply_bdt.sh \
+    --input-dir     /volatile/clas12/$USER/SULI/data_v01 \
+    --model         /work/clas12/$USER/SULI/models/tier1_v01/model.joblib \
+    --output-dir    /volatile/clas12/$USER/SULI/scored_data_v01 \
+    --threshold-csv /volatile/clas12/$USER/SULI/eval/v01/per_bin_thresholds.csv
+```
+
+Skip-existing by default (resume-friendly); pass `--force` to reprocess all.
+Scripts: `submit_apply_bdt.sh` (wrapper) · `_apply_bdt_job.sh` (worker)
+Python worker: `scripts/apply_bdt.py`
+
+---
+
 ## BDT training (Week 4)
 
 For training the ML classifier after ntuple production is complete, see the
