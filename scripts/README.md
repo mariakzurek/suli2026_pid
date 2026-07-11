@@ -262,6 +262,37 @@ python scripts/audit_species.py \
 
 ---
 
+## `apply_bdt.py`
+
+Apply a trained BDT (from `scripts/training/train_bdt.py`) to a ROOT file and
+write an augmented ROOT with all original branches plus `bdt_score` (float32)
+and optionally `bdt_pass` (bool).
+
+The model's feature list is authoritative — extracted from the wrapper dict
+`{"model": ..., "features": [...]}` in `model.joblib`.  Do not pass a feature
+list at the CLI; the model is the source of truth.
+
+**Threshold modes:**
+- *(none)* — writes `bdt_score` only.
+- `--threshold FLOAT` — also writes `bdt_pass = score > threshold` (strict `>`).
+- `--threshold-csv PATH` — per-`(p, theta)` bin lookup; CSV needs columns
+  `p_low, p_high, theta_low, theta_high, t_optimal`.  Tracks outside all bins
+  get `bdt_pass = False`.
+
+**Single-file usage:**
+
+```bash
+python scripts/apply_bdt.py \
+    --input  /volatile/clas12/$USER/SULI/data_v01/run_001.root \
+    --model  /work/clas12/$USER/SULI/models/tier1_v01/model.joblib \
+    --output /volatile/clas12/$USER/SULI/scored_data_v01/run_001.root \
+    --threshold-csv eval/v01/per_bin_thresholds.csv
+```
+
+For a directory of files, use the SLURM array wrapper `slurm/submit_apply_bdt.sh`.
+
+---
+
 ## `plot_all_variables.py`
 
 Diagnostic plots for all 54 columns in the training ntuple.  Produces one
