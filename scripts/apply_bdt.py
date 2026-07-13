@@ -196,7 +196,7 @@ def _load_threshold_csv(csv_path: pathlib.Path) -> pd.DataFrame:
     * theta ranges are [theta_low, theta_high) — same convention.
     * t_optimal must be a float in [0, 1]; not validated here but upstream.
     """
-    required = {"p_low", "p_high", "theta_low", "theta_high", "t_optimal"}
+    required = {"p_low", "p_high", "theta_low", "theta_high", "best_threshold"}
     df = pd.read_csv(str(csv_path))
     missing_cols = required - set(df.columns)
     if missing_cols:
@@ -211,7 +211,7 @@ def _load_threshold_csv(csv_path: pathlib.Path) -> pd.DataFrame:
             file=sys.stderr,
         )
         sys.exit(1)
-    return df[["p_low", "p_high", "theta_low", "theta_high", "t_optimal"]].copy()
+    return df[["p_low", "p_high", "theta_low", "theta_high", "best_threshold"]].copy()
 
 
 def _apply_threshold_csv(
@@ -256,7 +256,7 @@ def _apply_threshold_csv(
     p_high    = threshold_df["p_high"].to_numpy()
     t_low     = threshold_df["theta_low"].to_numpy()
     t_high    = threshold_df["theta_high"].to_numpy()
-    t_optimal = threshold_df["t_optimal"].to_numpy()
+    t_optimal = threshold_df["best_threshold"].to_numpy()
 
     for bi in range(len(threshold_df)):
         in_bin = (

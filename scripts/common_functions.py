@@ -385,10 +385,10 @@ def optimizeFOM(model_df, tBinEdges, pBinEdges, outputCSV=None, deviation=0):
                     best_t = np.nan
 
             results.append({
-                "thetaLow": tBinEdges[i],
-                "thetaHigh": tBinEdges[i + 1],
-                "pLow": pBinEdges[j],
-                "pHigh": pBinEdges[j + 1],
+                "theta_low": tBinEdges[i],
+                "theta_high": tBinEdges[i + 1],
+                "p_low": pBinEdges[j],
+                "p_high": pBinEdges[j + 1],
                 "best_threshold": best_t,
                 "best_fom": max_fom
             })
@@ -444,8 +444,8 @@ def apply_optimized_bdt_cut(df, threshold_df=None, CSVPath=None):
             continue
 
         bin_mask = (
-            (p >= row["pLow"]) & (p < row["pHigh"]) &
-            (theta >= row["thetaLow"]) & (theta < row["thetaHigh"])
+            (p >= row["p_low"]) & (p < row["p_high"]) &
+            (theta >= row["theta_low"]) & (theta < row["theta_high"])
         )
 
         pass_bdt |= bin_mask & (score > row["best_threshold"])
