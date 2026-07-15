@@ -102,18 +102,9 @@ from sklearn.metrics import (
     roc_curve,
 )
 from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
 
 
-# LightGBM import — provides a clear error if not installed.
-try:
-    from lightgbm import LGBMClassifier
-except ImportError:
-    print(
-        "ERROR: lightgbm not installed in the current environment.\n"
-        "       On ifarm: conda activate suli2026_pid && conda install -c conda-forge lightgbm",
-        file=sys.stderr,
-    )
-    sys.exit(1)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -344,42 +335,44 @@ def _write_readme(
     outdir: pathlib.Path,
     dataset_dir: pathlib.Path,
     feature_list: List[str],
-    lgb_params: dict,
+    mlp_params: dict,
     calibration_frac: float,
-    reweight_map: Optional[str],
     metrics: dict,
     timestamp: str,
 ) -> None:
     """Write a provenance README into the model output directory."""
+
     lines = [
-        "# BDT training run provenance\n",
+        "# MLP training run provenance\n",
         f"Generated: {timestamp}\n\n",
         "## Dataset\n",
         f"- Source: `{dataset_dir}`\n",
-        f"- Features ({len(feature_list)}): {', '.join(feature_list)}\n",
-        f"- Reweight map: {reweight_map or 'None (unweighted)'}\n\n",
+        f"- Features ({len(feature_list)}): {', '.join(feature_list)}\n\n",
         "## Hyperparameters\n",
     ]
-    for k, v in lgb_params.items():
+
+    for k, v in mlp_params.items():
         lines.append(f"- `{k}`: {v}\n")
+
     lines += [
         f"- calibration_frac: {calibration_frac}\n\n",
         "## Metrics (validation set)\n",
     ]
+
     for k, v in metrics.items():
         if isinstance(v, float):
             lines.append(f"- {k}: {v:.5f}\n")
         else:
             lines.append(f"- {k}: {v}\n")
+
     lines += [
         "\n## Outputs\n",
-        "- `model.joblib` — wrapper dict {\"model\": calibrated LightGBM + Platt calibrator, "
-        "\"features\": list of training feature names}\n",
-        "- `training_summary.csv` — AUC, Brier, log-loss for train/val pre/post cal\n",
-        "- `reliability_diagram.png` — calibration quality (on val set)\n",
-        "- `roc_val.png` — ROC curve on val set\n",
-        "- `feature_importance.png` / `.csv` — top-15 features by gain\n",
+        '- `model.joblib` — wrapper dict {"model": calibrated MLPClassifier, "features": feature list}\n',
+        "- `training_summary.csv` — AUC, Brier score, and log-loss before/after calibration\n",
+        "- `reliability_diagram.png` — reliability diagram on the validation set\n",
+        "- `roc_val.png` — ROC curve on the validation set\n",
     ]
+
     (outdir / "README.md").write_text("".join(lines))
 
 
@@ -444,6 +437,17 @@ def train_mlp(
 
     df_train_full = pd.read_parquet(str(train_path))
     df_val = pd.read_parquet(str(val_path))
+
+# Replace sentinel values with NaN so the imputer can recognize them
+    df_train_full[feature_list] = (
+        df_train_full[feature_list]
+        .replace(-9999, np.nan)
+    )
+
+    df_val[feature_list] = (
+        df_val[feature_list]
+        .replace(-9999, np.nan)
+    )
 
     missing_feats = [
         f for f in feature_list
@@ -520,7 +524,7 @@ def train_mlp(
     # ------------------------------------------------------------
 
     default_mlp = dict(
-        hidden_layer_sizes=(128, 64, 32),
+        hidden_layer_sizes=(64, 64),
         activation="relu",
         solver="adam",
         alpha=1e-4,
@@ -548,20 +552,13 @@ def train_mlp(
     **default_mlp
     )
 
-    clf = Pipeline(
-        [
-            (
-                "imputer",
-                SimpleImputer(
-                    strategy="median"
-                ),
-            ),
-            (
-                "mlp",
-                mlp,
-            ),
-        ]
-    )
+    from sklearn.preprocessing import StandardScaler
+
+    clf = Pipeline([
+        ("imputer", SimpleImputer(strategy="median")),
+        ("scaler", StandardScaler()),
+        ("mlp", mlp),
+    ])
 
     clf.fit(
         X_fit,
