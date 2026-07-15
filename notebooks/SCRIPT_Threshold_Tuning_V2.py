@@ -625,7 +625,7 @@ for (thetaLow, thetaHigh), group in results_df.groupby(["theta_low", "theta_high
         group["best_fom"],
         marker="o",
         linestyle="",
-        label="BDT optimized"
+        label="MLP optimized"
     )
 
     ax.plot(
@@ -723,7 +723,7 @@ for i in range(len(thetaBins)):
 
         ax.plot(thresholds, fom_values, linewidth=1)
 
-        ax.set_xlabel("BDT Threshold")
+        ax.set_xlabel("MLP Threshold")
         ax.set_ylabel(r"FOM")
 
         ax.set_title(
@@ -837,7 +837,7 @@ for i in range(len(thetaBins)):
 
         # Denominator
         axes[2].plot(thresholds, denominator_values, linewidth=1)
-        axes[2].set_xlabel("BDT Threshold")
+        axes[2].set_xlabel("MLP Threshold")
         axes[2].set_ylabel(r"$\sqrt{N_K+N_\pi}$")
         axes[2].grid(True)
 
@@ -1048,7 +1048,7 @@ ax.set_xticks(pBinEdges)
 
 ax.set_xlabel("Momentum (GeV/c)")
 ax.set_ylabel("Efficiency")
-ax.set_title("Efficiency  (Using Optimized BDT)")
+ax.set_title("Efficiency  (Using Optimized MLP)")
 
 ax.grid(False)
 ax.legend()
@@ -1158,7 +1158,7 @@ ax.set_xticks(pBinEdges)
 
 ax.set_xlabel("Momentum (GeV/c)")
 ax.set_ylabel("Contamination")
-ax.set_title("Contamination (Using Optimized BDT)")
+ax.set_title("Contamination (Using Optimized MLP)")
 ax.set_ylim(0,0.5)
 
 ax.grid(False)

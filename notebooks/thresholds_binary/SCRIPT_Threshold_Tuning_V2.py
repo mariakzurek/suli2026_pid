@@ -351,7 +351,7 @@ import uproot
 
 
 import sys
-sys.path.append("../scripts/")
+sys.path.append("../../scripts/")
 
 from pathlib import Path
 import common_functions as au
@@ -365,7 +365,7 @@ import common_functions as au
 df_val = pd.read_parquet("/work/clas12/CooperBe/MLStuff/dataset_v03/val.parquet")
 
 #df_val=au.apply_Sidis_Cuts(df_val)
-mod, mod_df = au.load_model_and_data("/work/clas12/CooperBe/MLStuff/tier2All/model_v02/model.joblib", df_val)
+mod, mod_df = au.load_model_and_data("/work/clas12/CooperBe/MLStuff/tier2All/model_MLP_binary/model.joblib", df_val)
 allPlots=[]
 
 
@@ -448,7 +448,7 @@ for i in range(len(thetaBins)):
 
 
 results_df = pd.DataFrame(results)
-results_df.to_csv("../figures/full_range/FOM/optimized_thresholdsV5.csv", index=False)
+results_df.to_csv("../../figures/binary_MLP/FOM/optimized_thresholdsV5.csv", index=False)
 
 
 # In[7]:
@@ -488,7 +488,7 @@ def apply_bdt_cut(df, threshold_df):
 
 df_test=pd.read_parquet("/work/clas12/CooperBe/MLStuff/dataset_v03/test.parquet")
 df_test=df_test[df_test["mc_matching_pid"]!=-9999]
-feature_names=au.get_feature_names("/work/clas12/CooperBe/MLStuff/tier2All/model_v02/model.joblib")
+feature_names=au.get_feature_names("/work/clas12/CooperBe/MLStuff/tier2All/model_MLP_binary/model.joblib")
 print(feature_names)
 df_test = au.apply_model_to_df(mod, df_test, feature_names)
 
@@ -510,7 +510,7 @@ results_df = pd.DataFrame(results)
 # Momentum bin centers
 results_df["pCenter"] = (results_df["p_low"] + results_df["p_high"]) / 2
 
-outdir = "../figures/optimized/"
+outdir = "../../figures/binary_MLP/"
 os.makedirs(outdir, exist_ok=True)
 
 for (thetaLow, thetaHigh), group in results_df.groupby(["theta_low", "theta_high"]):
@@ -559,7 +559,7 @@ results_df = pd.DataFrame(results)
 # Momentum bin centers
 results_df["pCenter"] = (results_df["p_low"] + results_df["p_high"]) / 2
 
-outdir = "../figures/optimized/"
+outdir = "../../figures/binary_MLP/"
 os.makedirs(outdir, exist_ok=True)
 
 allPlots = []
@@ -654,7 +654,7 @@ for (thetaLow, thetaHigh), group in results_df.groupby(["theta_low", "theta_high
     fig.savefig(os.path.join(outdir, filename), dpi=150)
     chiComp.append(fig)
     plt.close(fig)
-with PdfPages("/work/clas12/CooperBe/Argonne2026/suli2026_pid/figures/full_range/FOM/" + "BDT_Chi2_FOM_comparison.pdf") as pdf:
+with PdfPages("/work/clas12/CooperBe/Argonne2026/suli2026_pid/figures/binary_MLP/FOM/" + "BDT_Chi2_FOM_comparison.pdf") as pdf:
     for plot in chiComp:
         pdf.savefig(plot)
 
@@ -758,7 +758,7 @@ fomBDTScans2 = []
 
 thresholds = np.linspace(0.0, 0.95, 100)
 
-outdir = "../figures/full_range_FOM/FOM_scans_BDT2/"
+outdir = "../../figures/MLP_binary/FOM_scans_BDT2/"
 os.makedirs(outdir, exist_ok=True)
 
 for i in range(len(thetaBins)):
@@ -850,7 +850,7 @@ for i in range(len(thetaBins)):
 # SAVE MULTI-PAGE PDF
 # -------------------------------------------------
 pdf_path = (
-    "/work/clas12/CooperBe/Argonne2026/suli2026_pid/figures/full_range/FOM/num_denom_FOM_BDT_PerBin.pdf"
+    "/work/clas12/CooperBe/Argonne2026/suli2026_pid/figures/binary_MLP/FOM/num_denom_FOM_BDT_PerBin.pdf"
 )
 
 with PdfPages(pdf_path) as pdf:
@@ -866,7 +866,7 @@ fomChi2Scans = []
 
 thresholds_chi = np.linspace(0, 3.0, 100)
 
-outdir = "../figures/optimized/FOM_scans_chi2/"
+outdir = "../../figures/binary_MLP/FOM_scans_chi2/"
 os.makedirs(outdir, exist_ok=True)
 
 allPlots = []
@@ -944,7 +944,7 @@ for i in range(len(thetaBins)):
 # PDF OUTPUT
 # -------------------------------------------------
 with PdfPages(
-    "/work/clas12/CooperBe/Argonne2026/suli2026_pid/figures/full_range/FOM/FOM_chi2_PerBin.pdf"
+    "/work/clas12/CooperBe/Argonne2026/suli2026_pid/figures/binary_MLP/FOM/FOM_chi2_PerBin.pdf"
 ) as pdf:
     for plot in allPlots:
         pdf.savefig(plot)
@@ -1054,7 +1054,7 @@ ax.grid(False)
 ax.legend()
 
 
-outpath = "../figures/full_range/FOM/efficiency_vs_p_THRESHOLD.png"
+outpath = "../../figures/binary_MLP/FOM/efficiency_vs_p_THRESHOLD.png"
 fig.savefig(outpath, dpi=150)
 allPlots.append(fig)
 plt.show()
@@ -1127,7 +1127,7 @@ import matplotlib.pyplot as plt
 import os
 import numpy as np
 
-outdir = "../figures"
+outdir = "../../figures/"
 os.makedirs(outdir, exist_ok=True)
 
 fig, ax = plt.subplots(figsize=(8,6))
@@ -1165,7 +1165,7 @@ ax.grid(False)
 ax.legend()
 
 
-outpath = "../figures/full_range/FOM/contamination_vs_p_THRESHOLD.png"
+outpath = "../../figures/binary_MLP/FOM/contamination_vs_p_THRESHOLD.png"
 fig.savefig(outpath, dpi=150)
 allPlots.append(fig)
 plt.show()
@@ -1174,7 +1174,7 @@ plt.show()
 # In[ ]:
 
 
-with PdfPages("/work/clas12/CooperBe/Argonne2026/suli2026_pid/figures/full_range/FOM/" + "FOM_Maximized.pdf") as pdf:
+with PdfPages("/work/clas12/CooperBe/Argonne2026/suli2026_pid/figures/binary_MLP/FOM/" + "FOM_Maximized.pdf") as pdf:
     for plot in allPlots:
         pdf.savefig(plot)
 
