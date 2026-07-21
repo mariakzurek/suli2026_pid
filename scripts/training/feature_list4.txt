@@ -1,0 +1,34 @@
+# feature_list.txt — audit KEEP list for BDT training
+#
+# This file is read at runtime by build_dataset.py (--features-file).
+# Fill it in with the feature names that passed the Week-3 audit (KEEP or
+# CANDIDATE decisions from figures/feature_audit/kp/feature_audit_summary.csv).
+#
+# Format: one branch name per line, # for comments, blank lines ignored.
+# Branch names must match exactly the column names in the MC ROOT ntuples
+# under /volatile/clas12/$USER/SULI/mc_v01/.
+#
+# Example (replace with real audit KEEP list before running build_dataset.py):
+#   beta
+#   chi2pid
+#   ftof_energy_1A
+#   nphe_htcc
+#
+# DO NOT add kinematic columns (p, theta, phi, vz, sector) or label/pid columns
+# here — build_dataset.py always includes those regardless of this file.
+
+
+ftof_energy_1B
+ftof_time_1B
+ftof_path_1B 
+ecin_time
+ecin_path
+ecin_energy
+nphe_htcc
+nphe_ltcc
+beta
+chi2pid
+ecout_energy
+ecout_time
+ecout_path
+

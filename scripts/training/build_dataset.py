@@ -131,6 +131,7 @@ _ALWAYS_COLS = ["p", "theta", "phi", "vz", "sector", "chi2pid",
 # EB K+ PID code
 PID_KPLUS  = 321
 PID_PIPLUS = 211
+PID_PROTON = 2212
 
 # Default columns-file, resolved relative to this script.
 _DEFAULT_COLUMNS_FILE = pathlib.Path(__file__).parent / "columns_maximal.txt"

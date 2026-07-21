@@ -1,11 +1,10 @@
-# Tier 2 — 8 features: Tier 1 (beta + chi2pid + FTOF 1B) + FTOF 1A panel.
-# Extends Tier 1 with the second FTOF layer; expected to improve K/π separation materially.
+# Tier 2 — adds chi2pid and FTOF 1A. Expected to improve K/π separation materially.
 
 beta
-chi2pid
-ftof_energy_1A
 ftof_energy_1B
-ftof_time_1A
 ftof_time_1B
-ftof_path_1A
 ftof_path_1B
+chi2pid
+ecin_path
+ecin_energy
+ecin_time
