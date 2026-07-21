@@ -35,9 +35,10 @@ kinematics =["Mx_eKX","Mx_epiX","Mx_epX", "Q2", "W", "y"]
 for kin in kinematics:
     cols.append(kin)
     
-df = uproot.open("~/ML_Files/epkx_data/scored_larger/larger.root:PhysicsEvents").arrays(cols, library="pd")
-df=df[df["rich_best_ntot"]>2]
-df=df[df["rich_RQ"]>0.1]
+df = uproot.open("~/ML_Files/scored_data_v01/nSidis_005046.root:PhysicsEvents").arrays(cols, library="pd")
+df=df[df["rich_best_ntot"]>3]
+df=df[df["rich_RQ"]>0.2]
+df=df[df["rich_best_PID"]!=-9999]
 df=au.apply_Sidis_Cuts(df)
 
 outDir="../../figures/Data_Application/"
@@ -51,10 +52,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # Define momentum bins
-pEdges = au.makeBinEdges(3, 5, 10)
+pEdges = au.makeBinEdges(2.5, 5, 10)
 
 # Select RICH angular range
-df_rich = df[df["theta"] < 20]
+df_rich = df[df["theta"] < 11.25]
 # = df_rich[
  #   (df_rich["rich_best_PID"] == 321) |
   #  (df_rich["rich_best_PID"] == 221) |
@@ -118,7 +119,7 @@ plt.errorbar(
 
 plt.xlabel("Momentum p (GeV)")
 plt.ylabel("Kaon contamination")
-plt.title(r"BDT RICH Truth contamination theta < 20")
+plt.title(r"Optimized BDT ep->eKX contamination with RICH Truth")
 
 # Put ticks at bin edges
 plt.xticks(pEdges)
@@ -144,7 +145,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # Define momentum bins
-pEdges = au.makeBinEdges(3, 5, 10)
+pEdges = au.makeBinEdges(2.5, 5, 10)
 
 
 
@@ -159,7 +160,7 @@ pBins = au.makeBins(df_rich, "p", binEdges=pEdges)
 
 for i, pbin in enumerate(pBins):
 
-    chiMask=au.ApplyMatchedEfficiency(pbin, "matched_eff_thresholds.csv")
+    chiMask=au.ApplyMatchedEfficiency(pbin, "../data_application/matched_eff_thresholds.csv")
 
     numerator_df = pbin[
         (pbin["pid"] == 321) &
@@ -222,7 +223,7 @@ plt.savefig(outDir+"chi2pid_rich_contamination.png",
 plt.show()
 
 
-# In[9]:
+# In[5]:
 
 
 import uproot
@@ -266,8 +267,8 @@ df["chi_pass"] = passes_kplus_chi2pid_cut(df["chi2pid"],df["p"])
 # Apply good RICH quality cuts
 # -------------------------------------------------------
 df = df[
-    (df["rich_best_ntot"] > 2.5) &
-    (df["rich_RQ"] > 0.1) &
+    (df["rich_best_ntot"] > 3) &
+    (df["rich_RQ"] > 0.2) &
     (df["rich_best_PID"] != -9999)
 ]
 
@@ -282,15 +283,15 @@ outDir = "../../figures/Data_Application/"
 # All true pions with good RICH
 pCut_all = df[
     (df["p"] > 3) &
-    (df["theta"] < 20) &
+    (df["theta"] < 11.25) &
     (df["pid"] == 211)
 ]
 
 
 # True pions passing BDT kaon selection
 pCut_bdt = df[
-    (df["p"] > 3) &
-    (df["theta"] < 20) &
+    (df["p"] > 2.5) &
+    (df["theta"] < 11.25) &
     (df["pid"] == 211) &
     (df["bdt_pass"])
 ]
@@ -298,8 +299,8 @@ pCut_bdt = df[
 
 # True pions classified as kaons by RICH
 pCut_rich = df[
-    (df["p"] > 3) &
-    (df["theta"] < 20) &
+    (df["p"] > 2.5) &
+    (df["theta"] < 11.25) &
     (df["pid"] == 211) &
     (df["rich_best_PID"] == 321)
 ]
@@ -307,8 +308,8 @@ pCut_rich = df[
 
 # True pions passing chi2pid kaon selection
 pCut_chi2pid = df[
-    (df["p"] > 3) &
-    (df["theta"] < 20) &
+    (df["p"] > 2.5) &
+    (df["theta"] < 11.25) &
     (df["pid"] == 211) &
     (df["chi_pass"])
 ]
@@ -378,151 +379,13 @@ plt.show()
 plt.close()
 
 
-# In[ ]:
+# In[6]:
 
 
-import glob
-import pandas as pd
-import awkward as ak
-import uproot
-
-# -------------------------------------------------------
-# Load first 5 eKX scored ROOT files
-# -------------------------------------------------------
-
-data_dir = "/work/clas12/CooperBe/MLStuff/scored_data_v01/"
-
-root_files = glob.glob(data_dir + "*.root")[:5]
-
-print("Using ROOT files:", len(root_files))
-
-dfs = []
-
-for file in root_files:
-    print("Loading:", file)
-
-    arr = uproot.open(
-        file + ":PhysicsEvents"
-    ).arrays(cols)
-
-    temp = ak.to_dataframe(arr)
-
-    dfs.append(temp)
+# ------------------------------------------------------- # Columns needed # ------------------------------------------------------- cols = [ "pid", "p", "theta", "beta", "chi2pid", "rich_RQ", "rich_best_PID", "rich_best_ntot", "Mx_eKX", "Q2", "W", "y", "vz", "bdt_pass", "bdt_score", "Mx_epiX" ] # ------------------------------------------------------- # Load eKX scored sample # ------------------------------------------------------- df = uproot.open( "/work/clas12/CooperBe/MLStuff/scored_data_v01/nSidis_005125.root:PhysicsEvents" ).arrays(cols, library="pd") # ------------------------------------------------------- # Apply RICH acceptance and quality cuts # ------------------------------------------------------- df = df[ (df["theta"] < 20) & (df["rich_best_ntot"] > 2.5) & (df["rich_RQ"] > 0.1) & (df["rich_best_PID"] != -9999)& (df["Mx_epiX"] != -9999) ] outDir = "../../figures/Data_Application/" # ------------------------------------------------------- # Define kaon selections # ------------------------------------------------------- # EB kaon ID kCut_EB = df[ (df["pid"] == 321) ] # BDT kaon ID kCut_BDT = df[ (df["bdt_pass"])&(df["pid"] == 321) ] # RICH kaon ID kCut_RICH = df[ (df["rich_best_PID"] == 321) ] # ------------------------------------------------------- # Check statistics # ------------------------------------------------------- print("Events with good RICH:") print("Total:", len(df)) print("EB K:", len(kCut_EB)) print("BDT K:", len(kCut_BDT)) print("RICH K:", len(kCut_RICH)) # ------------------------------------------------------- # Plot Mx(eKX) # ------------------------------------------------------- plt.figure(figsize=(7,5)) plt.hist( kCut_EB["Mx_epiX"], bins=100, histtype="step", label=r"$ep\rightarrow ehX,\ h=EB\ K^+$", density=False ) plt.hist( kCut_BDT["Mx_epiX"], bins=100, histtype="step", label=r"$ep\rightarrow ehX,\ h=BDT\ K^+$", density=False ) plt.hist( kCut_RICH["Mx_epiX"], bins=100, histtype="step", label=r"$ep\rightarrow ehX,\ h=RICH\ K^+$", density=False ) plt.xlabel(r"$M_X(epiX)$ [GeV]") plt.ylabel("Counts") plt.title(r"$ep\rightarrow epiX$ Kaon PID comparison (RICH acceptance)") # Let matplotlib determine range first # Uncomment after checking the distribution: # plt.xlim(0,5) plt.legend() plt.grid(False) plt.savefig( outDir + "Mx_epiX_RICH_overlap.png", dpi=150, bbox_inches="tight" ) plt.xlim(0, 1) plt.show() plt.close()
 
 
-df = pd.concat(
-    dfs,
-    ignore_index=True
-)
-
-print("Total events loaded:", len(df))
-
-
-# -------------------------------------------------------
-# Apply RICH acceptance and quality cuts
-# -------------------------------------------------------
-
-df = df[
-    (df["p"] > 1.75) &
-    (df["theta"] < 20) &
-    (df["rich_best_ntot"] > 2.5) &
-    (df["rich_RQ"] > 0.1) &
-    (df["rich_best_PID"] != -9999) &
-    (df["Mx_epiX"] != -9999)
-]
-
-
-outDir = "../../figures/Data_Application/"
-
-
-# -------------------------------------------------------
-# Define kaon selections
-# -------------------------------------------------------
-
-# EB kaon ID
-kCut_EB = df[
-    (df["pid"] == 321)
-]
-
-
-# BDT kaon ID
-kCut_BDT = df[
-    (df["pid"] == 321) &
-    (df["bdt_pass"])
-]
-
-
-# RICH kaon ID
-kCut_RICH = df[
-    (df["rich_best_PID"] == 321)
-]
-
-
-# -------------------------------------------------------
-# Check statistics
-# -------------------------------------------------------
-
-print("Events with good RICH:")
-print("Total:", len(df))
-print("EB K:", len(kCut_EB))
-print("BDT K:", len(kCut_BDT))
-print("RICH K:", len(kCut_RICH))
-
-
-# -------------------------------------------------------
-# Plot Mx(eKX)
-# -------------------------------------------------------
-
-plt.figure(figsize=(7,5))
-
-
-plt.hist(
-    kCut_EB["Mx_epiX"],
-    bins=100,
-    histtype="step",
-    label=r"$ep\rightarrow ehX,\ h=EB\ K^+$"
-)
-
-
-plt.hist(
-    kCut_BDT["Mx_epiX"],
-    bins=100,
-    histtype="step",
-    label=r"$ep\rightarrow ehX,\ h=BDT\ K^+$"
-)
-
-
-plt.hist(
-    kCut_RICH["Mx_epiX"],
-    bins=100,
-    histtype="step",
-    label=r"$ep\rightarrow ehX,\ h=RICH\ K^+$"
-)
-
-
-plt.xlabel(r"$M_X(epiX)$ [GeV]")
-plt.ylabel("Counts")
-plt.title(r"$ep\rightarrow epiX$ Kaon PID comparison (RICH acceptance)")
-
-
-plt.xlim(0,5)
-
-plt.legend()
-plt.grid(False)
-
-
-plt.savefig(
-    outDir + "Mx_epiX_RICH_overlap.png",
-    dpi=150,
-    bbox_inches="tight"
-)
-
-
-plt.show()
-plt.close()
-
-
-# In[8]:
+# In[7]:
 
 
 import uproot
