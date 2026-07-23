@@ -1,1 +1,1 @@
-/work/clas12/CooperBe/MLStuff/epkx_data/large/epkx_dataset_large.root
+/work/clas12/CooperBe/MLStuff/data_epiN_v02/epiN_dataset.root

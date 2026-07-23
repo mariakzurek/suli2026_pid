@@ -252,7 +252,7 @@ cols = [
 
 # Load scored pion sample
 df = uproot.open(
-    "~/ML_Files/data_epiN_v01/scored/epiN_dataset.root:PhysicsEvents"
+    "~/ML_Files/data_epiN_v02/scored/epiN_dataset.root:PhysicsEvents"
 ).arrays(cols, library="pd")
 
 

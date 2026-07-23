@@ -179,7 +179,8 @@ kinematics =["Mx_eKX","Mx_epiX","Mx_epX", "Q2", "W", "y"]
 for kin in kinematics:
     cols.append(kin)
 
-df_test = uproot.open("/volatile/clas12/cooperb/SULI/pid_training_v2.root:PhysicsEvents").arrays(cols, library="pd")
+#df_test = uproot.open("/volatile/clas12/cooperb/SULI/pid_training_v2.root:PhysicsEvents").arrays(cols, library="pd")
+df_test = uproot.open("~/ML_Files/MC_dataset_eKX/pid_training_v3.root:PhysicsEvents").arrays(cols, library="pd")
 
 #df_test=pd.read_parquet("/work/clas12/CooperBe/MLStuff/dataset_v03/test.parquet")
 df_test=df_test[df_test["mc_matching_pid"]!=-9999]
@@ -306,7 +307,7 @@ plt.grid(False)
 
 
 plt.savefig(
-    outDir+"MC_kaon_contamination_comparison.png",
+    outDir+"MC_RQ_kaon_contamination_comparison.png",
     dpi=150,
     bbox_inches="tight"
 )
@@ -339,7 +340,7 @@ plt.xlabel("Momentum (GeV/c)")
 plt.ylabel("Kaon contamination")
 
 plt.title(
-    r"ep->eKX contamination with MC Truth"
+    r"ep->eKX contamination with MC Truth (RICH Quality Cuts)"
 )
 
 plt.xticks(pEdges)
@@ -356,7 +357,7 @@ plt.grid(False)
 
 
 plt.savefig(
-    outDir+"data_mc_contam_comparison.png",
+    outDir+"RICH_RQ_data_mc_contam_comparison.png",
     dpi=150,
     bbox_inches="tight"
 )
