@@ -25,7 +25,7 @@
 # SLURM DIRECTIVES
 # ─────────────────────────────────────────────────────────────────────────────
 #SBATCH --job-name=pid_train
-#SBATCH --time=00:45:00
+#SBATCH --time=01:30:00
 #SBATCH --mem=4G
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
