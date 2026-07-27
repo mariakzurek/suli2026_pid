@@ -33,6 +33,7 @@ from baseline_chi2pid import passes_kplus_chi2pid_cut
 
 peak_width=0.15
 
+
 def gauss_poly(x, A, mu, sigma, m, b):
     gaussian = A * np.exp(-0.5 * ((x - mu)/sigma)**2)
 
@@ -69,7 +70,7 @@ def gaussian_fitter(df, output_png=False, peak_width=peak_width, title=None):
     # ----------------------------
     # Get missing mass values
     # ----------------------------
-
+    
     if isinstance(df, pd.DataFrame):
         mx = df["Mx_epiX"].dropna().to_numpy()
     else:
@@ -112,12 +113,20 @@ def gaussian_fitter(df, output_png=False, peak_width=peak_width, title=None):
     # Initial guesses
     # ----------------------------
 
+    initial_mass = np.mean(mx[(mx >= fit_min) & (mx <= fit_max)])
+
+    # Fallback in case the window is empty
+    if np.isnan(initial_mass):
+        initial_mass = neutron_mass
+    if initial_mass >0.92:
+        intial_mass=neutron_mass
+
     p0 = [
-        max(fit_counts.max(), 1),
-        neutron_mass,
-        0.02,
-        0.0,
-        np.median(fit_counts)
+        max(fit_counts.max(), 1),   # Amplitude
+        initial_mass,               # Mean
+        0.02,                       # Sigma
+        0.0,                        # Background slope
+        np.median(fit_counts)       # Background intercept
     ]
 
 
@@ -580,7 +589,7 @@ def contamination_pipeline(
     fake_result, fake_fig = gaussian_fitter(
         df_epiN[cutMask],
         output_png=True,
-        peak_width=peak_width,
+        peak_width=0.05,
         title=title + " : EB K + BDT"
     )
 
@@ -634,7 +643,7 @@ print("opening root file")
 # User setting
 # ----------------------------
 
-N_FILES = 16   # <-- change this
+N_FILES = 50  # <-- change this
 
 
 # ----------------------------
@@ -671,7 +680,7 @@ cols.extend(kinematics)
 # Find ROOT files
 # ----------------------------
 
-data_dir = "/work/clas12/CooperBe/MLStuff/scored_data_v01/"
+data_dir = "/work/clas12/CooperBe/MLStuff/scored_data_v02/"
 
 files = sorted(
     glob.glob(data_dir + "*.root")
@@ -752,8 +761,8 @@ outDir="../../figures/Data_Application/epiN/"
 plot_mx_histogram(df)
 
 
-pEdges = au.makeBinEdges(2.5,5,10)
-tEdges = au.makeBinEdges(10,20,1)
+pEdges = au.makeBinEdges(2.75,5,10)
+tEdges = au.makeBinEdges(5,20,1)
 
 tbins = au.makeBins(df, "theta", binEdges=tEdges)
 n_theta = len(tbins)
@@ -906,10 +915,28 @@ with PdfPages(outDir + "mx_perbin.pdf") as pdf:
 
 
             # ----------------------------
+            # Identify Line2D objects that belong to errorbar containers
+            # (data line + cap lines) so we don't double-plot them below
+            # ----------------------------
+
+            errorbar_lines = set()
+
+            for c in old_ax.containers:
+                if isinstance(c, matplotlib.container.ErrorbarContainer):
+                    data_line, caplines, barlinecols = c.lines
+                    errorbar_lines.add(data_line)
+                    for cap in caplines:
+                        errorbar_lines.add(cap)
+
+
+            # ----------------------------
             # Copy fit curves
             # ----------------------------
 
             for line in old_ax.lines:
+
+                if line in errorbar_lines:
+                    continue  # skip — drawn once via containers loop below
 
                 line_label = line.get_label()
 
@@ -949,15 +976,14 @@ with PdfPages(outDir + "mx_perbin.pdf") as pdf:
 
                             if len(segments) > 0:
 
+                                half_heights = [
+                                    abs(seg[0][1] - seg[1][1]) / 2
+                                    for seg in segments
+                                ]
+
                                 yerr = np.array([
-                                    [
-                                        abs(seg[0][1] - seg[1][1])
-                                        for seg in segments
-                                    ],
-                                    [
-                                        abs(seg[0][1] - seg[1][1])
-                                        for seg in segments
-                                    ]
+                                    half_heights,
+                                    half_heights
                                 ])
 
 
