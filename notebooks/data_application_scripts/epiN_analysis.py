@@ -152,6 +152,8 @@ def gaussian_fitter(df, output_png=False, peak_width=peak_width, title=None):
     # Fit
     # ----------------------------
 
+    fit_ok = True
+
     try:
 
         popt, pcov = curve_fit(
@@ -169,6 +171,7 @@ def gaussian_fitter(df, output_png=False, peak_width=peak_width, title=None):
 
         popt = np.asarray(p0)
         pcov = np.zeros((5,5))
+        fit_ok = False
 
 
     A, mu, sigma, m, b = popt
@@ -191,6 +194,32 @@ def gaussian_fitter(df, output_png=False, peak_width=peak_width, title=None):
 
 
     neutron_yield = integral / bin_width
+
+
+    # ----------------------------
+    # Yield uncertainty (delta method)
+    #
+    # The yield is a nonlinear function of the fit parameters
+    # (A, mu, sigma, m, b). Rather than assuming Poisson counting
+    # statistics on the extracted yield (which ignores background
+    # subtraction and correlations between the fit parameters),
+    # we propagate the full parameter covariance matrix from
+    # curve_fit through to the yield using a numerically evaluated
+    # Jacobian (first-order Taylor / delta method):
+    #
+    #   Var(yield) = J^T . Cov(popt) . J
+    #
+    # where J_i = d(yield)/d(popt_i)
+    # ----------------------------
+
+    neutron_yield_err = compute_yield_uncertainty(
+        popt,
+        pcov,
+        fit_min,
+        fit_max,
+        bin_width,
+        fit_ok=fit_ok
+    )
 
 
     # ----------------------------
@@ -322,7 +351,7 @@ def gaussian_fitter(df, output_png=False, peak_width=peak_width, title=None):
         0.95,
         f"$\\mu$ = {mu:.4f}\n"
         f"$\\sigma$ = {sigma:.4f}\n"
-        f"Yield = {neutron_yield:.0f}\n"
+        f"Yield = {neutron_yield:.0f} $\\pm$ {neutron_yield_err:.0f}\n"
         f"$\\chi^2$ = {chi2:.1f}\n"
         f"$\\chi^2$/ndf = {chi2_ndf:.2f}",
         transform=ax.transAxes,
@@ -352,8 +381,75 @@ def gaussian_fitter(df, output_png=False, peak_width=peak_width, title=None):
         "chi2_ndf": chi2_ndf,
         "params": popt,
         "covariance": pcov,
-        "yield": neutron_yield
+        "yield": neutron_yield,
+        "yield_err": neutron_yield_err
     }, fig
+
+
+def compute_yield_uncertainty(popt, pcov, fit_min, fit_max, bin_width, fit_ok=True, eps=1e-6):
+
+    """
+    Propagate the Gaussian+polynomial fit's parameter covariance matrix
+    to an uncertainty on the extracted (background-subtracted) Gaussian
+    yield, using the delta method:
+
+        Var(yield) = J^T . Cov(popt) . J
+
+    J is evaluated numerically (central finite differences) since the
+    yield integral has no convenient closed form once it is clipped to
+    a finite window.
+
+    Returns 0.0 if the fit failed or the covariance matrix is not
+    finite/well-defined (e.g. curve_fit returned inf on a poorly
+    constrained parameter), since in that case the parameter
+    uncertainties themselves are not meaningful.
+    """
+
+    if not fit_ok:
+        return 0.0
+
+    pcov = np.asarray(pcov, dtype=float)
+
+    if not np.all(np.isfinite(pcov)):
+        print("Warning: non-finite covariance matrix, yield uncertainty set to 0")
+        return 0.0
+
+    def yield_func(params):
+
+        A, mu, sigma, m, b = params
+
+        gaussian = lambda x: A * np.exp(-0.5 * ((x - mu) / sigma)**2)
+
+        integral, _ = quad(gaussian, fit_min, fit_max)
+
+        return integral / bin_width
+
+
+    n_params = len(popt)
+    jac = np.zeros(n_params)
+
+    for i in range(n_params):
+
+        step = eps * max(abs(popt[i]), 1.0)
+
+        dp_plus = np.array(popt, dtype=float)
+        dp_minus = np.array(popt, dtype=float)
+
+        dp_plus[i] += step
+        dp_minus[i] -= step
+
+        y_plus = yield_func(dp_plus)
+        y_minus = yield_func(dp_minus)
+
+        jac[i] = (y_plus - y_minus) / (2 * step)
+
+
+    variance = jac @ pcov @ jac.T
+
+    if not np.isfinite(variance) or variance < 0:
+        return 0.0
+
+    return float(np.sqrt(variance))
 
 
 def plot_mx_histogram(df, output_name="Mx_debug.png"):
@@ -408,6 +504,9 @@ def compute_epiN_misID(df, cutMask):
         (pions reconstructed as kaons)
 
     Both yields come from independent Gaussian + polynomial fits.
+    Uncertainties are propagated from each fit's own covariance-derived
+    yield uncertainty (see compute_yield_uncertainty), not from a
+    Poisson counting-statistics approximation on the yield.
     """
 
     # -------------------------
@@ -421,6 +520,7 @@ def compute_epiN_misID(df, cutMask):
     )
 
     n_total = denom_fit["yield"]
+    n_total_err = denom_fit["yield_err"]
 
 
     # -------------------------
@@ -440,6 +540,7 @@ def compute_epiN_misID(df, cutMask):
     )
 
     n_fake = fake_fit["yield"]
+    n_fake_err = fake_fit["yield_err"]
 
 
     # -------------------------
@@ -453,10 +554,16 @@ def compute_epiN_misID(df, cutMask):
     misID = n_fake/n_total
 
 
-    # binomial approximation
-    if n_fake > 0:
-        error = misID*np.sqrt(
-            (1/n_fake)+(1/n_total)
+    # Standard error propagation for a ratio R = n_fake / n_total,
+    # using each fit's actual yield uncertainty rather than assuming
+    # sqrt(1/n) Poisson statistics. This treats the two fits as
+    # statistically independent (they are fit to disjoint data
+    # samples: the BDT-selected kaons vs. the full pi+K+p sample);
+    # if that independence assumption is not appropriate for your
+    # analysis, a covariance term would need to be added here.
+    if n_fake > 0 and n_total > 0:
+        error = misID * np.sqrt(
+            (n_fake_err / n_fake)**2 + (n_total_err / n_total)**2
         )
     else:
         error = 0
@@ -476,7 +583,8 @@ def compute_pion_efficiency(df):
         EB-PID pions + kaons + protons neutron yield
 
     Both yields are extracted from Gaussian + polynomial fits
-    to the neutron peak.
+    to the neutron peak, and uncertainties are propagated from
+    each fit's covariance-derived yield uncertainty.
     """
 
     # --------------------------------
@@ -490,6 +598,7 @@ def compute_pion_efficiency(df):
     )
 
     n_total = total_fit["yield"]
+    n_total_err = total_fit["yield_err"]
 
 
     # --------------------------------
@@ -505,6 +614,7 @@ def compute_pion_efficiency(df):
     )
 
     n_pi = pion_fit["yield"]
+    n_pi_err = pion_fit["yield_err"]
 
 
     if n_total <= 0:
@@ -514,10 +624,11 @@ def compute_pion_efficiency(df):
     efficiency = n_pi / n_total
 
 
-    # statistical uncertainty
-    if n_pi > 0:
-        error = efficiency*np.sqrt(
-            (1/n_pi) + (1/n_total)
+    # standard ratio error propagation using the fits' own
+    # covariance-derived yield uncertainties
+    if n_pi > 0 and n_total > 0:
+        error = efficiency * np.sqrt(
+            (n_pi_err / n_pi)**2 + (n_total_err / n_total)**2
         )
     else:
         error = 0
@@ -527,11 +638,27 @@ def compute_pion_efficiency(df):
 
 
 
-def compute_epiN_contamination(df_SIDIS, misID, efficiency, cutMask):
+def compute_epiN_contamination(df_SIDIS, misID, misID_err, efficiency, efficiency_err, cutMask):
+
+    """
+    Propagates uncertainty through the full contamination chain:
+
+        n_true_pi = n_reco_pi / efficiency
+        n_fake    = misID * n_true_pi
+        contam    = n_fake / n_k
+
+    n_reco_pi and n_k are raw event counts (not fit yields), so Poisson
+    counting statistics (sqrt(N)) is the appropriate uncertainty for
+    them. misID and efficiency carry their own propagated uncertainties
+    from the Gaussian-fit yields (misID_err, efficiency_err). All
+    quantities are treated as statistically independent and combined
+    in quadrature at each step.
+    """
 
     df_pi = df_SIDIS[df_SIDIS["pid"] == 211]
 
     n_reco_pi = len(df_pi)
+    n_reco_pi_err = np.sqrt(n_reco_pi) if n_reco_pi > 0 else 0
 
     if efficiency <= 0:
         return 0,0
@@ -540,13 +667,32 @@ def compute_epiN_contamination(df_SIDIS, misID, efficiency, cutMask):
     # efficiency correction
     n_true_pi = n_reco_pi / efficiency
 
+    if n_reco_pi > 0 and efficiency > 0:
+        rel_err_n_true_pi = np.sqrt(
+            (n_reco_pi_err / n_reco_pi)**2 + (efficiency_err / efficiency)**2
+        )
+    else:
+        rel_err_n_true_pi = 0
+
+    n_true_pi_err = n_true_pi * rel_err_n_true_pi
+
 
     # expected pion leakage
     n_fake = misID*n_true_pi
 
+    if n_fake > 0 and misID > 0:
+        rel_err_n_fake = np.sqrt(
+            (misID_err / misID)**2 + rel_err_n_true_pi**2
+        )
+    else:
+        rel_err_n_fake = 0
+
+    n_fake_err = n_fake * rel_err_n_fake
+
 
     # selected kaons
     n_k = len(df_SIDIS[cutMask])
+    n_k_err = np.sqrt(n_k) if n_k > 0 else 0
 
 
     if n_k <= 0:
@@ -556,9 +702,9 @@ def compute_epiN_contamination(df_SIDIS, misID, efficiency, cutMask):
     contamination = n_fake/n_k
 
 
-    if n_fake > 0:
-        err = contamination*np.sqrt(
-            (1/n_fake)+(1/n_k)
+    if n_fake > 0 and n_k > 0:
+        err = contamination * np.sqrt(
+            rel_err_n_fake**2 + (n_k_err / n_k)**2
         )
     else:
         err = 0
@@ -618,7 +764,9 @@ def contamination_pipeline(
     contamination, contamination_err = compute_epiN_contamination(
         df_SIDIS,
         misID,
+        misID_err,
         efficiency,
+        efficiency_err,
         cutMask_SIDIS
     )
 
@@ -1203,3 +1351,194 @@ with PdfPages(outDir + "metrics.pdf") as pdf:
 
 print("Metric plots missing:", failed)
 print("pdf saved as "+outDir+" metrics.pdf")
+#########################################################################################################################
+
+
+import math
+import awkward as ak
+
+def compute_contamination_ak(arr, pid=None):
+    """
+    Computes contamination among reconstructed K+ candidates.
+
+    Parameters
+    ----------
+    arr : awkward.Array
+        Input array with fields "pid" and "mc_matching_pid".
+    pid : int or None, optional
+        If None, computes total contamination
+        (all non-321 truth particles reconstructed as K+).
+        Otherwise computes the contamination contribution
+        from the specified MC PID.
+
+    Returns
+    -------
+    r : float
+        Contamination fraction.
+    rErr : float
+        Statistical uncertainty.
+    """
+    temp = arr[arr["pid"] == 321]
+
+    if pid is None:
+        # Total contamination
+        a = ak.sum(temp["mc_matching_pid"] != 321)
+    else:
+        # Contribution from one particle species
+        a = ak.sum(temp["mc_matching_pid"] == pid)
+
+    b = ak.num(temp, axis=0) if temp.ndim == 1 else len(temp)
+
+    r = 0.0
+    rErr = 99.0
+    if b != 0:
+        r = a / b
+    if a != 0:
+        rErr = r * math.sqrt((1 / a) + (1 / b))
+    return r, rErr
+
+
+
+
+print("performing MC corss-check")
+###############################################################################################################################
+# MC comparison
+###############################################################################################################################
+cols.append("mc_matching_pid")
+df_mc = uproot.open("~/ML_Files/MC_scored/pid_training_v2.root:PhysicsEvents").arrays(cols, library="pd")
+
+df_pass_mc=df_mc[df_mc["bdt_pass"]==True]
+
+
+# ----------------------------
+# Bin the MC data the same way as the data
+# (same theta/p edges as above)
+# ----------------------------
+
+print("binning MC data for contamination comparison")
+
+mc_con = []
+mc_con_er = []
+
+tbins_mc = au.makeBins(df_mc, "theta", binEdges=tEdges)
+n_theta_mc = len(tbins_mc)
+
+for i, tbin_mc in enumerate(tbins_mc):
+
+    mc_con.append([])
+    mc_con_er.append([])
+
+    pbins_mc = au.makeBins(
+        tbin_mc,
+        "p",
+        binEdges=pEdges
+    )
+
+    for j, pbin_mc in enumerate(pbins_mc):
+
+        value, error = compute_contamination_ak(pbin_mc)
+
+        mc_con[i].append(value)
+        mc_con_er[i].append(error)
+
+print("MC contamination binning complete")
+
+
+##################################################################################################
+# Plot 1: MC contamination only
+##################################################################################################
+
+fig, ax = plt.subplots(figsize=(8,6))
+
+for i in range(n_theta_mc):
+
+    ax.errorbar(
+        p_centers,
+        mc_con[i],
+        yerr=mc_con_er[i],
+        marker="o",
+        linestyle="none",
+        capsize=3,
+        label=(
+            f"{tEdges[i]:.1f} < θ < "
+            f"{tEdges[i+1]:.1f}°"
+        )
+    )
+
+ax.set_xlabel("p [GeV/c]")
+ax.set_ylabel("Kaon contamination")
+ax.set_title("MC Kaon Contamination vs Momentum")
+ax.legend()
+
+fig.savefig(
+    outDir+"mc_kaon_contamination_vs_p.png",
+    dpi=150,
+    bbox_inches="tight"
+)
+
+plt.close(fig)
+
+print("MC-only contamination plot saved")
+
+
+##################################################################################################
+# Plot 2: MC overlaid with the epiN-truth contamination
+##################################################################################################
+
+fig, ax = plt.subplots(figsize=(8,6))
+
+colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+
+n_overlay = min(n_theta, n_theta_mc)
+
+for i in range(n_overlay):
+
+    color = colors[i % len(colors)]
+
+    ax.errorbar(
+        p_centers,
+        con[i],
+        yerr=con_er[i],
+        marker="o",
+        linestyle="none",
+        capsize=3,
+        color=color,
+        label=(
+            f"epiN truth: {tEdges[i]:.1f} < θ < "
+            f"{tEdges[i+1]:.1f}°"
+        )
+    )
+
+    ax.errorbar(
+        p_centers,
+        mc_con[i],
+        yerr=mc_con_er[i],
+        marker="s",
+        linestyle="none",
+        capsize=3,
+        color=color,
+        markerfacecolor="none",
+        label=(
+            f"MC: {tEdges[i]:.1f} < θ < "
+            f"{tEdges[i+1]:.1f}°"
+        )
+    )
+
+ax.set_xlabel("p [GeV/c]")
+ax.set_ylabel("Kaon contamination")
+ax.set_title("SIDIS Kaon Contamination: epiN Truth vs MC")
+ax.legend(fontsize=7)
+
+fig.savefig(
+    outDir+"contamination_mc_vs_epiN_truth_vs_p.png",
+    dpi=150,
+    bbox_inches="tight"
+)
+
+plt.close(fig)
+
+print("MC vs epiN-truth overlay plot saved")
+
+
+
+
