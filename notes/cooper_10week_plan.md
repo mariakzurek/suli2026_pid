@@ -177,7 +177,7 @@ For each variable, confirm the hit-fraction (fraction of tracks with a non-missi
 
 **Step 2d — (p, θ) data/MC comparison for the reweighting decision.** *(Not completed in Week 2 — carried over into Week 3. See Week 3 for the full task description and output requirements.)*
 
-Even though `p` and `theta` are not ML training features, comparing their 2D distributions between MC and data is critical for Task 3 (Connor's reweighting). Connor's reweighting computes 2D data/MC ratios in (p, θ) bins and reweights MC events to match data; before deciding whether to use that approach, we need to know whether the distributions actually differ and by how much.
+Even though `p` and `theta` are not ML training features, comparing their 2D distributions between MC and data is critical for Task 3. Compute 2D data/MC ratios in (p, θ) bins and reweight MC events to match data; before deciding whether to use that approach, we need to know whether the distributions actually differ and by how much.
 
 Cooper must:
   - Plot the 2D (p, θ) distribution for MC (EB-K+ tracks) and for data (EB-K+ tracks) side by side, using the same binning as the analysis grid.
@@ -525,31 +525,108 @@ The exclusive ep \to e\pi^+(n) study does not measure SIDIS kaon contamination d
 
 ---
 
-### Week 10 — Report final; poster final; handoff
+### Week 10 — Systematics; write-up; presentation; handoff
 
-**Theme.** Polish. Submit.
+---
 
-**Cooper's tasks.**
-- Report final pass. Address all of Maria's comments. Add missing figures, redo any plot that's substandard. Aim for the report to be self-contained — a stranger should be able to read it and understand what was done.
+**Task A — Systematic uncertainties (Monday–Tuesday, highest priority)**
 
-- Code repo cleanup. README rewrite. One-command training reproducibility test (delete everything, re-clone, re-run, confirm same model). Tag a release.
-- Practice talk for SULI symposium. Maria + 1-2 lab members as audience.
-- Handoff document: 2-page memo to whoever picks this up next (likely a future SULI student or graduate student). What works, what doesn't, what's the next obvious thing to try.
 
-**Maria's tasks.**
-- Final report review.
-- Attend practice talk.
+*Source 1 — MC statistical uncertainty per (p, θ) bin.* The per-bin pion contamination is C^{π→K} = N(π→K) / [N(K→K) + N(π→K) + N(p→K)]. The statistical uncertainty is binomial: σ = sqrt(C*(1-C)/N_total_bin). Per-bin counts are already in the test-set CSV at `figures/full_range/evaluate_outputs/per_bin_sweep.csv`. Read N from that file, compute σ for every bin, add a `stat_unc` column. This you probably already pop
+
+*Source 2 — Threshold sensitivity.* The per-bin FOM-optimized thresholds live in `figures/full_range/optimized_thresholdsV3.csv` (or V4 — use whichever is most recent). For each bin, take the optimal threshold t*, shift it by ±0.05 (one typical grid step), re-evaluate C^{π→K} using the test-set scores already in memory — no retraining, just recount — and record |ΔC|. This is a loop over bins in a notebook or short script; call the output `threshold_sensitivity.csv`.
+
+*Source 3 — Calibration sensitivity.* The model wrapper in `model.joblib` stores the Platt-calibrated classifier. To recover the uncalibrated score, access the inner LightGBM object via `model["model"].calibrated_classifiers_[0].base_estimator.predict_proba(X)` — this is the scikit-learn 1.5.x attribute path for `CalibratedClassifierCV` with `cv='prefit'`; verify the attribute chain interactively before running in bulk, because the path differs slightly between sklearn versions. Run `evaluate.py` logic on uncalibrated scores using the same per-bin thresholds; record the difference in C^{π→K} per bin. If the difference is smaller than the MC statistical uncertainty in every bin, state that calibration has negligible effect and move on. Do not spend more than half a day on this source.
+
+*Source 4 — (p, θ) reweighting — the outstanding debt.* This is the most consequential source to handle carefully. The BDT was trained on uniformly weighted MC. The data/MC (p, θ) ratio, plotted in Week 4 at `figures/feature_audit/ptheta_data_mc_ratio.png`, encodes how much the EB-K⁺ track distribution in data differs from MC across (p, θ) space. Connor's reweighting was never applied. The question is how much that omission moves the contamination numbers.
+
+Estimate the effect without retraining: load the test-set parquet; for each event, look up its (p, θ) bin and read the data/MC ratio from the Week-4 map. If the ratio map was saved only as a PNG and not as a CSV, recompute the ratios from the audit summary CSVs in `figures/feature_audit/` before Monday afternoon — check first. Apply the per-event ratio as a sample weight when computing C^{π→K} on the test set (a simple weighted average over the test events in each bin). Compare weighted vs unweighted C^{π→K} per bin. If the weighted and unweighted numbers agree within the threshold-sensitivity band from Source 2, reweighting is a negligible systematic for this study — state that explicitly. If they differ by more than the threshold band, record the difference per bin and report it as: "unquantified systematic: MC/data (p,θ) reweighting not applied to training; estimated effect on contamination = X% in bin Y." Do not spend more than half a day on this estimation regardless of outcome. If the estimation itself cannot be completed in that time, quote the source as "not evaluated; the Week-3 ratio map was approximately flat; expected to be comparable to the threshold systematic" and move on. The write-up and talk do not block on this — they block on the total table existing.
+
+*Source 5 — RICH tag purity (for RICH-acceptance bins only)*. Vary it by ±1 step (e.g., if nominal is RQ>0.2, try RQ>0.3, statistics permitting). For each variation, recount the RICH-derived contamination estimate in each RICH-acceptance bin and record the drift.
+
+*Source 6 — Neutron mass window (for the exclusive-pion cross-check only).* Vary the window boundaries by ±1σ of the peak width and recount the pion-truth-tagged sample in each bin. Record the drift in the π-mis-ID rate. If the neutron peak is narrow and well-separated from background the drift will be small — state that. 
+
+*Output of Task A.* A single Markdown file `notes/systematics_summary.md` with one table per source: columns = {(p,θ) bin, nominal C^{π→K}, systematic shift ΔC, relative shift ΔC/C}. The total systematic per bin is the sum in quadrature of all six sources. Add a final summary column with the quadrature total. This file feeds directly into the write-up and the presentation. Maria reviews and signs off on the total band before the write-up begins — the sign-off is a mid-week gate, not an end-of-week formality.
+
+---
+
+**Task B — README and repository cleanup (Tuesday–Wednesday)**
+
+The repository has accumulated notebooks, backup files, and figures directories from ten weeks of iterative work. Before the write-up and handoff, it must be navigable by someone who was not present. This task is not optional polish; a new group member reading the repo in six months should be able to reproduce the trained model without asking anyone a question.
+
+*Top-level README (`suli2026_pid/README.md`).* Rewrite to include: (1) a one-paragraph project summary; (2) environment setup (`conda env create -f environment.yml`); (3) the four-step pipeline in order — ntuple production → dataset build → BDT training → evaluation — with the exact commands and the output each step produces; (4) pointer to the locked model location on `/work/clas12/`; (5) pointer to `notes/` for decision records and `figures/full_range/` for the canonical production plots.
+
+*Scripts README (`scripts/README.md`).* Verify it accurately describes the current `audit_species.py` flags, the KEEP/CANDIDATE/DROP thresholds, and the column schema. Update any stale paths or flag names. If any flag name changed after the README was last edited, fix it now — do not leave a README that contradicts the script it describes.
+
+*Training README (`scripts/training/README.md`).* Verify it describes the `build_dataset.py → train_bdt.py → evaluate.py` pipeline with the current flags. Add a note that `feature_list.txt` is deprecated; the production model uses `features_tier2.txt`. Add the `apply_bdt.py` step and its flags.
+
+*Slurm READMEs (`slurm/README.md`, `slurm/README_training.md`).* Verify paths, partition, and account. Add a one-liner on the PYTHONPATH-collision convention: do not `module load clas12` in Python-only training jobs.
+
+*Cleanup.* The BACKUP_* files in `scripts/training/multiclass/` should either be deleted (with a commit message that names them and explains they are superseded) or have a comment added at the top of each file saying "historical snapshot from [date] — not in production pipeline." Do not leave them silently stale. The `figures/` directory has subdirectories from iterative work (OLD/, efficienciesOLD/, and similar). Do not delete figures. Instead, create `figures/README.md` that maps each subdirectory to the week it came from and identifies `figures/full_range/evaluate_outputs/` as the canonical production-model output directory.
+
+---
+
+**Task C — Short illustrated write-up (Wednesday–Thursday)**
+
+Save as `notes/project_summary.md`. The target is a self-contained analysis note — 4–6 pages when rendered — with actual prose and embedded figures. Not a lab notebook, not bullet points. Seven sections in order.
+
+**Introduction (half page).** What problem this solves: the EB + chi2pid baseline misidentifies π⁺ as K⁺ at a rate that limits K⁺ analyses at CLAS12, particularly at high momentum. One sentence on what was built and what training sample it uses.
+
+**Dataset and feature audit (half page).** The MC and data samples: clasdis RICH-on, RGA Fa18 inbending pass-2. The audit methodology in one paragraph — three drift metrics, 9 (p,θ) cells, KEEP/CANDIDATE/DROP. 
+
+**Classifier (half page).** Tier 2 feature set: `beta`, `ftof_energy_1B`, `ftof_time_1B`, `ftof_path_1B`, `chi2pid`, `ecin_path`, `ecin_energy`, `ecin_time`. LightGBM BDT with fixed hyperparameters. Per-(p,θ)-bin FOM threshold optimization on the validation set. Platt calibration. Embed `figures/full_range/reliability_diagram.png`.
+
+**Results on MC (one page).** C^{π→K} and ε^K as a function of (p,θ): BDT at matched efficiency vs chi2pid baseline. Embed `figures/full_range/evaluate_outputs/contam_vs_ptheta_baseline_vs_bdt.png` and `contamination_BDT_vs_chi2pid.png`. Quote the headline number: at matched K⁺ efficiency, what is the contamination reduction in the best and worst bins. Be honest about bins where the improvement is marginal.
+
+**Data validation (one page).** Two subsections. First, RICH cross-check: which (p,θ) bins have RICH coverage in the data sample; what the RICH-derived contamination estimate is in those bins vs the ML estimate; whether they are consistent; quote Δ = C_ML − C_RICH and whether it is within combined uncertainty. Second, exclusive-pion π-mis-ID: the ep→eπ⁺(n) neutron-peak method; the ratio N(BDT-accepted EB-K⁺ in neutron-peak events) / N(all positive hadrons in neutron-peak events) per bin; MC prediction vs data measurement; the transfer assumption stated explicitly.
+
+**Systematic uncertainties (half page).** Reproduce the table from `notes/systematics_summary.md`. One paragraph on the reweighting debt: "The (p,θ) data/MC reweighting was not applied at training time. The estimated effect on C^{π→K} is X%." If the reweighting effect is smaller than the threshold systematic, state that it is subdominant.
+
+**Conclusions and next steps (quarter page).** What was demonstrated. What a follow-up study would do first: apply (p,θ) reweighting, extend validation to the full SIDIS analysis channel, retrain on a larger data ntuple when one is available.
+
+Every figure path in the write-up must point to a file that exists in the repo. Before finalizing `project_summary.md`, run `ls` on every embedded figure path. Do not write placeholder paths. Figures must come from `figures/full_range/evaluate_outputs/` and `figures/full_range/` — those are the canonical production-model outputs. Do not use figures from `figures/optimized/` or `figures/Baselines/` except as clearly labeled supplementary material.
+
+---
+
+**Task D — Presentation deck additions (Thursday)**
+
+The CLAS12 presentation deck already covers Weeks 1–5 material. Cooper adds slides covering the second half of the project. Do not redesign existing slides — new slides only, appended. Each slide carries one key figure and 2–3 bullet takeaways. 
+
+1. **Full-range BDT result.**  Takeaways: headline contamination reduction, how it varies with (p,θ), which bins are marginal. Speaker note: set up the comparison protocol — matched efficiency, per-bin FOM threshold — and state the headline reduction number directly.
+
+2. **Per-theta contamination slices.** Takeaways: the improvement is strongest in the low-theta slice; high-theta shows [pattern].
+
+3. **RICH cross-check.** Figure: the RICH-vs-ML contamination comparison plot from the Week 9 validation work (whichever file exists). Takeaways: data agrees with MC prediction within [X]%; the bins where the agreement holds; any bin where it does not. Include kinematic coverage of RICH, so it is clear in what region can we use it as "true" information.
+
+4. **Exclusive-pion cross-check.** Figure: the π-mis-ID rate from the ep→eπ⁺(n) ratio method. Takeaways: data-driven mis-ID rate consistent with MC prediction; the transfer assumption; the (p,θ) coverage. Include kinematic coverage of this method, so it is clear in what region can we use it as "true" information.
+
+
+5. **Systematic uncertainty summary.** A table slide: one row per source (MC stat, threshold, calibration, reweighting, RICH tag purity, neutron window), columns = source name and ΔC/C per bin range. Takeaways: which source dominates; what the total quadrature systematic is. 
+
+6. **Conclusions and next steps.** Three bullets maximum. What the classifier delivers for the `ep → e' p K+ X` analysis. What comes next. 
 
 **Done when.**
-- Report final, PDF, committed to repo as `report_final.pdf`.
-- Repo tagged `v1.0`.
-- Handoff memo written.
-- SULI symposium talk delivered.
+- `notes/systematics_summary.md` exists with a per-bin table covering all six sources and a quadrature-total column. Maria has signed off on the total systematic band.
+- `notes/project_summary.md` written, renders cleanly in a Markdown viewer, and every embedded figure path resolves to a file that exists in the repo.
+- Top-level `suli2026_pid/README.md` rewritten and accurate.
+- `scripts/README.md`, `scripts/training/README.md`, `slurm/README.md`, `slurm/README_training.md` verified and updated.
+- `figures/README.md` created with subdirectory map.
+- CLAS12 presentation deck has six new slides with speaker notes.
+- Repo tagged `v1.0` after the README and cleanup commits land.
+- CLAS12 poster presented on Thursday. Slides submitted or presented at Friday CLAS group meeting.
+
+**Maria's tasks.**
+- Monday morning: confirm the nominal RQ threshold for RICH tag purity (Source 5) and the neutron-peak M_X(eπ⁺) window (Source 6) before Cooper codes those systematics. Both inputs are needed before noon Monday.
+- Mid-week: review `notes/systematics_summary.md` and sign off on the total systematic band before it goes into the write-up. Bins classified as "disagrees, source unclear" from the Week 9 diagnosis need Maria's read before the table is finalized.
+- Thursday: review the six new presentation slides and speaker notes.
 
 **Risks / dependencies.**
-- Cooper runs out of time on polish. Severity M. Mitigation: have a "minimum viable report" version ready by Wednesday. Polish on top of a working version, not from scratch.
+- Reweighting estimation (Source 4) requires reading the (p,θ) ratio map produced in Week 3. If that map was saved only as a PNG and not as a CSV, Cooper must recompute the per-bin ratios from the audit summary CSVs in `figures/feature_audit/` before Monday afternoon. Check first; recomputing is straightforward if the audit CSVs have the per-bin MC and data counts.
+- Calibration sensitivity (Source 3): the `model["model"].calibrated_classifiers_[0].base_estimator` attribute path is correct for scikit-learn 1.5.x with `CalibratedClassifierCV(cv='prefit')`. Check the path in an interactive session before running in bulk. If the path differs, the fix is one line, but discovering it mid-run wastes time.
+- Write-up figure paths must point at files that actually exist in the repo. Before committing `project_summary.md`, verify every path with `ls`. Do not write placeholder paths and intend to fix them later.
 
-**Fallback / scope-down.** Cut the practice talk if time-critical. Cut the handoff memo length to 1 page.
+
+**Fallback / scope-down.** If Source 4 (reweighting) takes more than half a day, quote it as "not evaluated; expected to be comparable to threshold systematic based on the approximate flatness of the Week-3 ratio map" and move on. Do not let the reweighting estimation block the write-up. If any systematic source cannot be evaluated in the available time, list it in `systematics_summary.md` as "not evaluated" with a reason — that is an honest accounting and is better than a table that silently omits a source.
 
 ---
 
