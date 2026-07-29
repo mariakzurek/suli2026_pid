@@ -181,7 +181,7 @@ def make_systematic_quadrature_table(csv_files, output_md="systematic_table.md")
         master[source] = values
 
 
-    # -------------------------------------------------
+   # -------------------------------------------------
     # Quadrature sum
     # -------------------------------------------------
 
@@ -195,13 +195,60 @@ def make_systematic_quadrature_table(csv_files, output_md="systematic_table.md")
         ]
     ]
 
+    # Ensure all systematic columns are numeric
+    master[sys_cols] = master[sys_cols].apply(
+        pd.to_numeric,
+        errors="coerce"
+    )
 
+    # Treat any value >= 9999 as missing
+    master[sys_cols] = master[sys_cols].mask(
+        master[sys_cols] >= 9999,
+        np.nan
+    )
+
+    # Diagnostic: report any remaining large values
+    print("\n=== Large systematic values (>=100) ===")
+    for col in sys_cols:
+        bad = master[master[col] >= 100]
+        if not bad.empty:
+            print(f"\nColumn: {col}")
+            print(
+                bad[
+                    [
+                        "p_lo",
+                        "p_hi",
+                        "theta_lo",
+                        "theta_hi",
+                        col
+                    ]
+                ].to_string(index=False)
+            )
+
+    # Compute quadrature ignoring NaNs
     master["quadrature"] = np.sqrt(
         np.nansum(
-            master[sys_cols].values**2,
+            np.square(master[sys_cols].to_numpy()),
             axis=1
         )
     )
+
+    # Diagnostic: show any suspicious quadrature values
+    bad_quad = master[master["quadrature"] >= 100]
+
+    if not bad_quad.empty:
+        print("\n=== Large quadrature values ===")
+        print(
+            bad_quad[
+                [
+                    "p_lo",
+                    "p_hi",
+                    "theta_lo",
+                    "theta_hi",
+                    "quadrature"
+                ] + sys_cols
+            ].to_string(index=False)
+        )
 
 
     # -------------------------------------------------
@@ -283,7 +330,7 @@ def plot_uncertainty_vs_momentum(
         plot_data["p_center"],
         plot_data[value_col],
         marker="o",
-        linestyle="-"
+        linestyle=""
     )
     ax.set_xlabel("Momentum p")
     ax.set_ylabel(value_col)
@@ -339,13 +386,13 @@ master_RICH = make_systematic_quadrature_table(
 )
 
 plot_uncertainty_vs_momentum(
-    master_MC,
-    theta_range=(5, 35),
+    master_Mc,
+    theta_range=(5, 15),
     output_png="uncertainty_vs_momentum_MC.png",
     title="Systematic Uncertainty vs Momentum, MC"
 )
 plot_uncertainty_vs_momentum(
-    master_MX,
+    master_Mx,
     theta_range=(5, 20),
     output_png="uncertainty_vs_momentum_MX.png",
     title="Systematic Uncertainty vs Momentum, MX"
