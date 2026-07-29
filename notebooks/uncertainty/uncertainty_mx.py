@@ -412,8 +412,8 @@ def run_grid(df, width):
 print(f"Running pipeline with peak_width = 0.15 (current)")
 con_initial = run_grid(df, 0.15)
 
-print(f"Running pipeline with peak_width = 0.20 (+0.05 shifted)")
-con_shifted = run_grid(df, 0.20)
+print(f"Running pipeline with peak_width = 0.20 (-0.05 shifted)")
+con_shifted = run_grid(df, 0.1)
 
 # ------------------------------------------------------------
 # Assemble output rows

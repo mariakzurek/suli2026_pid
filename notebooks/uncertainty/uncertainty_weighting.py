@@ -15,6 +15,7 @@ import awkward as ak
 import json
 import math
 from scipy.integrate import quad
+import itertools
 from scipy.optimize import curve_fit
 import uproot
 import sys
@@ -23,6 +24,9 @@ sys.path.append("../../scripts/")
 from pathlib import Path
 import common_functions as au
 from baseline_chi2pid import passes_kplus_chi2pid_cut
+
+p_edges=au.makeBinEdges(0.5,5,15)
+theta_edges=au.makeBinEdges(5,35,15)
 
 
 cols = [
@@ -134,104 +138,70 @@ df_mc = uproot.open("~/ML_Files/MC_scored/pid_training_v2.root:PhysicsEvents").a
 # ---------------------------------------------------------
 
 old_csv = "../../figures/feature_audit_week3/kp/feature_audit_summary.csv"
-csvOut = "weighting.csv"
+csvOut = "weighting_granular.csv"
 
 
 if Path(csvOut).exists():
-
     print(f"Loading existing weighting map: {csvOut}")
-
     weighting_df = pd.read_csv(csvOut)
-
-
 else:
-
     print("Weighting map not found. Creating from data/MC...")
-
-
     # -----------------------------------------------------
-    # Load old CSV only for bin definitions
+    # Build bin definitions from user-specified edges
+    # instead of reading them from old_csv
     # -----------------------------------------------------
-
-    old_df = pd.read_csv(old_csv)
-
-    weighting_df = old_df[
-        [
-            "p_lo",
-            "p_hi",
-            "theta_lo",
-            "theta_hi",
-        ]
-    ].drop_duplicates().copy()
-
+    bin_rows = []
+    for (p_lo, p_hi), (theta_lo, theta_hi) in itertools.product(
+        zip(p_edges[:-1], p_edges[1:]),
+        zip(theta_edges[:-1], theta_edges[1:]),
+    ):
+        bin_rows.append(
+            {"p_lo": p_lo, "p_hi": p_hi, "theta_lo": theta_lo, "theta_hi": theta_hi}
+        )
+    weighting_df = pd.DataFrame(bin_rows)
 
     n_data_list = []
     n_mc_list = []
     weight_list = []
-
-
     # -----------------------------------------------------
     # Compute data/MC ratio per bin
     # -----------------------------------------------------
-
     for _, row in weighting_df.iterrows():
-
         p_lo = row["p_lo"]
         p_hi = row["p_hi"]
-
         theta_lo = row["theta_lo"]
         theta_hi = row["theta_hi"]
-
-
-        # Data selection
         data_mask = (
             (df["p"] >= p_lo) &
             (df["p"] < p_hi) &
             (df["theta"] >= theta_lo) &
             (df["theta"] < theta_hi)
         )
-
         df_data_bin = df[data_mask]
-
-
-        # MC selection
         mc_mask = (
             (df_mc["p"] >= p_lo) &
             (df_mc["p"] < p_hi) &
             (df_mc["theta"] >= theta_lo) &
             (df_mc["theta"] < theta_hi)
         )
-
         df_mc_bin = df_mc[mc_mask]
-
-
-        # Use len() explicitly
         n_data = len(df_data_bin)
         n_mc = len(df_mc_bin)
-
-
         n_data_list.append(n_data)
         n_mc_list.append(n_mc)
-
-
         if n_mc > 0:
             weight_list.append(n_data / n_mc)
         else:
             weight_list.append(0.0)
 
-
     weighting_df["n_data"] = n_data_list
     weighting_df["n_mc"] = n_mc_list
     weighting_df["weight"] = weight_list
 
-
-    # Save so it does not need to be recalculated
-    weighting_df.to_csv(
-        csvOut,
-        index=False
-    )
-
+    weighting_df.to_csv(csvOut, index=False)
     print(f"Saved new weighting map: {csvOut}")
+
+
 
 
 
@@ -262,8 +232,8 @@ else:
     print("Optimized threshold file not found. Running optimization...")
     results_df = au.optimizeFOM(
         mod_df,
-        tBinEdges,
-        pBinEdges,
+        theta_edges,
+        p_edges,
         outputCSV=csvLocation,
         deviation=0.03
     )
@@ -432,7 +402,7 @@ for _, row in weighting_df.iterrows():
 
 contamination_df = pd.DataFrame(rows)
 
-outFile = "weighted_contamination_comparison.csv"
+outFile = "weighted_contamination_comparison_granular.csv"
 
 contamination_df.to_csv(
     outFile,

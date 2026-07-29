@@ -51,9 +51,10 @@ def rel_shift(csvPath, delta_c, c):
 rel_shift("calibration_sensitivity.csv","delta_c","c_calibrated")
 rel_shift("rich_contamination_binned.csv","delta_c","contamination_initial")
 rel_shift("weighted_contamination_comparison.csv","C_difference","C_unweighted")
+rel_shift("weighted_contamination_comparison_granular.csv","C_difference","C_unweighted")
 rel_shift("threshold_sensitivity.csv","delta_c_total","C_base")
 rel_shift("mx_width_sensitivity.csv","delta_c","contamination_initial")
-rel_shift("per_bin_sweep_uncertianties.csv","delta_c","contamination_initial")
+#rel_shift("per_bin_sweep_uncertianties.csv","delta_c","contamination_initial")
 
 
 

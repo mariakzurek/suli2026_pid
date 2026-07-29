@@ -65,7 +65,7 @@ def poisson_chi2(data, model):
     return chi2
 
 
-def gaussian_fitter(df, output_png=False, peak_width=peak_width, title=None):
+def gaussian_fitter(df, output_png=False, peak_width=peak_width, title=None, Rlim=0):
 
     # ----------------------------
     # Get missing mass values
@@ -88,6 +88,8 @@ def gaussian_fitter(df, output_png=False, peak_width=peak_width, title=None):
 
     fit_min = neutron_mass - peak_width
     fit_max = neutron_mass + peak_width
+    if ((Rlim!=0)&(fit_max>Rlim)):
+        fit_max=Rlim
 
 
     # ----------------------------
@@ -735,8 +737,9 @@ def contamination_pipeline(
     fake_result, fake_fig = gaussian_fitter(
         df_epiN[cutMask],
         output_png=True,
-        peak_width=0.05,
-        title=title + " : EB K + BDT"
+        peak_width=peak_width,
+        title=title + " : EB K + BDT",
+        Rlim=1.05
     )
 
 
