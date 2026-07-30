@@ -41,7 +41,18 @@ import common_functions as au
 # Fit functions (copied verbatim from the working script)
 # ------------------------------------------------------------
 
-peak_width = 0.15  # mutated at call time by run_grid() below
+BASELINE_RANGES = {
+    "denom": (0.80, 1.10),
+    "fake":  (0.80, 1.05),
+    "pion":  (0.80, 1.10),
+}
+
+
+SHIFTED_RANGES = {
+    "denom": (0.75, 1.15),
+    "fake":  (0.75, 1.07),
+    "pion":  (0.75, 1.15),
+}
 
 
 def gauss_poly(x, A, mu, sigma, m, b):
@@ -51,7 +62,7 @@ def gauss_poly(x, A, mu, sigma, m, b):
     return gaussian + background
 
 
-def gaussian_fitter(df, output_png=False, peak_width=peak_width, title=None):
+def gaussian_fitter(df, fit_min, fit_max, output_png=False, title=None):
 
     if isinstance(df, pd.DataFrame):
         mx = df["Mx_epiX"].dropna().to_numpy()
@@ -62,100 +73,279 @@ def gaussian_fitter(df, output_png=False, peak_width=peak_width, title=None):
     mx = mx[mx != -9999]
 
     neutron_mass = 0.95
-    fit_min = neutron_mass - peak_width
-    fit_max = neutron_mass + peak_width
 
-    counts, edges = np.histogram(mx, bins=50, range=(fit_min, fit_max))
+    # --------------------------------
+    # Histogram in requested fit range
+    # --------------------------------
+
+    counts, edges = np.histogram(
+        mx,
+        bins=50,
+        range=(fit_min, fit_max)
+    )
+
     centers = 0.5 * (edges[:-1] + edges[1:])
     bin_width = edges[1] - edges[0]
 
     fit_counts = counts
     fit_centers = centers
 
-    initial_mass = np.mean(mx[(mx >= fit_min) & (mx <= fit_max)])
+
+    # --------------------------------
+    # Initial guesses
+    # --------------------------------
+
+    initial_mass = np.mean(
+        mx[(mx >= fit_min) & (mx <= fit_max)]
+    )
+
     if np.isnan(initial_mass):
         initial_mass = neutron_mass
+
     if initial_mass > 0.92:
         initial_mass = neutron_mass
 
+
     p0 = [
-        max(fit_counts.max(), 1),
-        initial_mass,
-        0.02,
-        0.0,
-        np.median(fit_counts)
+        max(fit_counts.max(), 1),   # amplitude
+        initial_mass,               # mean
+        0.02,                       # sigma
+        0.0,                        # background slope
+        np.median(fit_counts)       # background intercept
     ]
 
+
+    # --------------------------------
+    # Fit bounds
+    #
+    # Gaussian mean is constrained
+    # around neutron mass, independent
+    # of the fit window.
+    # --------------------------------
+
     bounds = (
-        [0, neutron_mass - peak_width, 0.005, -np.inf, -np.inf],
-        [np.inf, neutron_mass + peak_width, 0.5, np.inf, np.inf]
+        [
+            0,
+            0.90,
+            0.005,
+            -np.inf,
+            -np.inf
+        ],
+        [
+            np.inf,
+            1.00,
+            0.5,
+            np.inf,
+            np.inf
+        ]
     )
 
+
+    # --------------------------------
+    # Fit
+    # --------------------------------
+
     fit_ok = True
+
     try:
+
         popt, pcov = curve_fit(
-            gauss_poly, fit_centers, fit_counts,
-            p0=p0, bounds=bounds, maxfev=10000
+            gauss_poly,
+            fit_centers,
+            fit_counts,
+            p0=p0,
+            bounds=bounds,
+            maxfev=10000
         )
+
     except RuntimeError:
+
         print("Warning: Gaussian fit failed, using initial guess")
+
         popt = np.asarray(p0)
-        pcov = np.zeros((5, 5))
+        pcov = np.zeros((5,5))
         fit_ok = False
+
 
     A, mu, sigma, m, b = popt
 
-    gaussian = lambda x: A * np.exp(-0.5 * ((x - mu) / sigma) ** 2)
-    integral, _ = quad(gaussian, fit_min, fit_max)
-    neutron_yield = integral / bin_width
 
-    neutron_yield_err = compute_yield_uncertainty(
-        popt, pcov, fit_min, fit_max, bin_width, fit_ok=fit_ok
+    # --------------------------------
+    # Gaussian yield
+    # --------------------------------
+
+    gaussian = lambda x: A * np.exp(
+        -0.5 * ((x - mu) / sigma)**2
     )
 
-    expected = gauss_poly(fit_centers, *popt)
-    errors = np.sqrt(np.maximum(fit_counts, 1))
-    chi2 = np.sum(((fit_counts - expected) / errors) ** 2)
+
+    integral, _ = quad(
+        gaussian,
+        fit_min,
+        fit_max
+    )
+
+
+    neutron_yield = integral / bin_width
+
+
+    neutron_yield_err = compute_yield_uncertainty(
+        popt,
+        pcov,
+        fit_min,
+        fit_max,
+        bin_width,
+        fit_ok=fit_ok
+    )
+
+
+    # --------------------------------
+    # Chi2
+    # --------------------------------
+
+    expected = gauss_poly(
+        fit_centers,
+        *popt
+    )
+
+    errors = np.sqrt(
+        np.maximum(fit_counts, 1)
+    )
+
+
+    chi2 = np.sum(
+        ((fit_counts - expected) / errors)**2
+    )
+
     ndf = len(fit_counts) - len(popt)
+
     chi2_ndf = chi2 / max(ndf, 1)
 
+
+
+    # --------------------------------
+    # Optional plot
+    # --------------------------------
+
     fig = None
+
     if output_png:
-        xfit = np.linspace(fit_centers.min(), fit_centers.max(), 500)
-        yfit = gauss_poly(xfit, *popt)
-        y_gauss = gaussian(xfit)
-        y_background = m * xfit + b
 
-        fig, ax = plt.subplots(figsize=(7, 5))
-        errors_all = np.sqrt(np.maximum(counts, 1))
-
-        ax.plot(xfit, yfit, label="Gaussian + Polynomial")
-        ax.plot(xfit, y_gauss, "--", label="Gaussian")
-        ax.plot(xfit, y_background, ":", label="Background")
-        ax.errorbar(
-            centers, counts, yerr=errors_all, fmt="o",
-            markersize=3, capsize=2, linestyle="none", label="Mx data"
+        xfit = np.linspace(
+            fit_centers.min(),
+            fit_centers.max(),
+            500
         )
-        ax.set_xlabel(r"$M_X(e\pi)$ [GeV]")
-        ax.set_ylabel("Counts")
-        ax.set_xlim(fit_min - 0.001, fit_max + 0.001)
+
+        yfit = gauss_poly(
+            xfit,
+            *popt
+        )
+
+        y_gauss = gaussian(xfit)
+
+        y_background = (
+            m*xfit + b
+        )
+
+
+        fig, ax = plt.subplots(
+            figsize=(7,5)
+        )
+
+
+        errors_all = np.sqrt(
+            np.maximum(counts,1)
+        )
+
+
+        ax.plot(
+            xfit,
+            yfit,
+            label="Gaussian + Polynomial"
+        )
+
+        ax.plot(
+            xfit,
+            y_gauss,
+            "--",
+            label="Gaussian"
+        )
+
+        ax.plot(
+            xfit,
+            y_background,
+            ":",
+            label="Background"
+        )
+
+        ax.errorbar(
+            centers,
+            counts,
+            yerr=errors_all,
+            fmt="o",
+            markersize=3,
+            capsize=2,
+            linestyle="none",
+            label="Mx data"
+        )
+
+
+        ax.set_xlabel(
+            r"$M_X(e\pi)$ [GeV]"
+        )
+
+        ax.set_ylabel(
+            "Counts"
+        )
+
+
+        ax.set_xlim(
+            fit_min - 0.001,
+            fit_max + 0.001
+        )
+
+
         if title is not None:
             ax.set_title(title)
+
+
         ax.text(
-            0.05, 0.95,
-            f"$\\mu$ = {mu:.4f}\n$\\sigma$ = {sigma:.4f}\n"
+            0.05,
+            0.95,
+            f"$\\mu$ = {mu:.4f}\n"
+            f"$\\sigma$ = {sigma:.4f}\n"
             f"Yield = {neutron_yield:.0f} $\\pm$ {neutron_yield_err:.0f}\n"
-            f"$\\chi^2$ = {chi2:.1f}\n$\\chi^2$/ndf = {chi2_ndf:.2f}",
-            transform=ax.transAxes, verticalalignment="top"
+            f"$\\chi^2$ = {chi2:.1f}\n"
+            f"$\\chi^2$/ndf = {chi2_ndf:.2f}",
+            transform=ax.transAxes,
+            verticalalignment="top"
         )
+
+
         ax.legend()
-        fig.savefig("neutron_fit_debug.png", dpi=150, bbox_inches="tight")
+
+
+        fig.savefig(
+            "neutron_fit_debug.png",
+            dpi=150,
+            bbox_inches="tight"
+        )
+
 
     return {
-        "mu": mu, "sigma": sigma, "A": A, "m": m, "b": b,
-        "chi2": chi2, "ndf": ndf, "chi2_ndf": chi2_ndf,
-        "params": popt, "covariance": pcov,
-        "yield": neutron_yield, "yield_err": neutron_yield_err
+        "mu": mu,
+        "sigma": sigma,
+        "A": A,
+        "m": m,
+        "b": b,
+        "chi2": chi2,
+        "ndf": ndf,
+        "chi2_ndf": chi2_ndf,
+        "params": popt,
+        "covariance": pcov,
+        "yield": neutron_yield,
+        "yield_err": neutron_yield_err
     }, fig
 
 
@@ -195,9 +385,14 @@ def compute_yield_uncertainty(popt, pcov, fit_min, fit_max, bin_width, fit_ok=Tr
     return float(np.sqrt(variance))
 
 
-def compute_epiN_misID(df, cutMask):
+def compute_epiN_misID(df, cutMask, fit_ranges):
 
-    denom_fit, denom_fig = gaussian_fitter(df, output_png=False, peak_width=peak_width)
+    denom_fit, denom_fig = gaussian_fitter(
+        df,
+        fit_min=fit_ranges["denom"][0],
+        fit_max=fit_ranges["denom"][1],
+        output_png=False
+    )
     plt.close(denom_fig) if denom_fig is not None else None
 
     n_total = denom_fit["yield"]
@@ -207,7 +402,13 @@ def compute_epiN_misID(df, cutMask):
     if len(df_fake) == 0:
         return 0, 0
 
-    fake_fit, fake_fig = gaussian_fitter(df_fake, output_png=False, peak_width=peak_width)
+    fake_fit, fake_fig = gaussian_fitter(
+        df_fake,
+        fit_min=fit_ranges["fake"][0],
+        fit_max=fit_ranges["fake"][1],
+        output_png=False
+    )
+    
     plt.close(fake_fig) if fake_fig is not None else None
 
     n_fake = fake_fit["yield"]
@@ -228,9 +429,13 @@ def compute_epiN_misID(df, cutMask):
     return misID, error
 
 
-def compute_pion_efficiency(df):
+def compute_pion_efficiency(df, fit_ranges):
 
-    total_fit, total_fig = gaussian_fitter(df, peak_width=peak_width)
+    total_fit, total_fig = gaussian_fitter(
+        df,
+        fit_min=fit_ranges["denom"][0],
+        fit_max=fit_ranges["denom"][1]
+    )
     plt.close(total_fig) if total_fig is not None else None
 
     n_total = total_fit["yield"]
@@ -238,7 +443,11 @@ def compute_pion_efficiency(df):
 
     df_pi = df[df["pid"] == 211]
 
-    pion_fit, pion_fig = gaussian_fitter(df_pi, peak_width=peak_width)
+    pion_fit, pion_fig = gaussian_fitter(
+        df_pi,
+        fit_min=fit_ranges["pion"][0],
+        fit_max=fit_ranges["pion"][1]
+    )
     plt.close(pion_fig) if pion_fig is not None else None
 
     n_pi = pion_fit["yield"]
@@ -364,18 +573,18 @@ n_p = len(pEdges) - 1
 # Run the (theta, p) grid at a given peak_width
 # ------------------------------------------------------------
 
-def run_grid(df, width):
-    global peak_width
-    peak_width = width
+def run_grid(df, fit_ranges):
 
     tbins = au.makeBins(df, "theta", binEdges=tEdges)
 
     con_grid = []
+    err_grid = []
 
     for i, tbin in enumerate(tbins):
         pbins = au.makeBins(tbin, "p", binEdges=pEdges)
 
         con_row = []
+        err_row = []
 
         for j, pbin in enumerate(pbins):
 
@@ -391,13 +600,28 @@ def run_grid(df, width):
                 (pbin_SIDIS["bdt_pass"] == True)
             )
 
-            misID, misID_err = compute_epiN_misID(pbin, passes)
-            efficiency, efficiency_err = compute_pion_efficiency(pbin)
+            misID, misID_err = compute_epiN_misID(
+                pbin,
+                passes,
+                fit_ranges
+            )
+
+            efficiency, efficiency_err = compute_pion_efficiency(
+                pbin,
+                fit_ranges
+            )
+
             contamination, contamination_err = compute_epiN_contamination(
-                pbin_SIDIS, misID, misID_err, efficiency, efficiency_err, passes_SIDIS
+                pbin_SIDIS,
+                misID,
+                misID_err,
+                efficiency,
+                efficiency_err,
+                passes_SIDIS
             )
 
             con_row.append(contamination)
+            err_row.append(contamination_err)
 
             plt.close("all")  # gaussian_fitter always builds a figure
                                # internally even with output_png=False;
@@ -405,15 +629,23 @@ def run_grid(df, width):
                                # across the many fits in this loop
 
         con_grid.append(con_row)
+        err_grid.append(err_row)
 
-    return con_grid
+    return con_grid, err_grid
 
 
-print(f"Running pipeline with peak_width = 0.15 (current)")
-con_initial = run_grid(df, 0.15)
+print("Running baseline fit ranges")
+con_initial, err_initial = run_grid(
+    df,
+    BASELINE_RANGES
+)
 
-print(f"Running pipeline with peak_width = 0.20 (-0.05 shifted)")
-con_shifted = run_grid(df, 0.1)
+
+print("Running shifted fit ranges")
+con_shifted, err_shifted = run_grid(
+    df,
+    SHIFTED_RANGES
+)
 
 # ------------------------------------------------------------
 # Assemble output rows
@@ -429,6 +661,10 @@ for i in range(n_theta):
 
         c_init = con_initial[i][j]
         c_shift = con_shifted[i][j]
+
+        c_init_err = err_initial[i][j]
+        c_shift_err = err_shifted[i][j]
+
         delta_c = abs(c_shift - c_init)
 
         rows.append({
@@ -436,8 +672,13 @@ for i in range(n_theta):
             "theta_hi": theta_hi,
             "p_lo": p_lo,
             "p_hi": p_hi,
+
             "contamination_initial": c_init,
+            "contamination_initial_err": c_init_err,
+
             "contamination_shifted": c_shift,
+            "contamination_shifted_err": c_shift_err,
+
             "delta_c": delta_c,
         })
 

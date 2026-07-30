@@ -65,7 +65,7 @@ def poisson_chi2(data, model):
     return chi2
 
 
-def gaussian_fitter(df, output_png=False, peak_width=peak_width, title=None, Rlim=0):
+def gaussian_fitter(df, output_png=False, peak_width=peak_width, title=None, Rlim=0, fit_min_override=None, fit_max_override=None):
 
     # ----------------------------
     # Get missing mass values
@@ -86,10 +86,18 @@ def gaussian_fitter(df, output_png=False, peak_width=peak_width, title=None, Rli
 
     neutron_mass = 0.95
 
-    fit_min = neutron_mass - peak_width
-    fit_max = neutron_mass + peak_width
+    if fit_min_override is not None:
+        fit_min = fit_min_override
+    else:
+        fit_min = neutron_mass - peak_width
+
+    if fit_max_override is not None:
+        fit_max = fit_max_override
+    else:
+        fit_max = neutron_mass + peak_width
+
     if ((Rlim!=0)&(fit_max>Rlim)&(fit_min<Rlim)):
-        fit_max=Rlim
+        fit_max = Rlim
 
 
     # ----------------------------
@@ -727,7 +735,8 @@ def contamination_pipeline(
     denom_result, denom_fig = gaussian_fitter(
         df_epiN,
         output_png=True,
-        peak_width=peak_width,
+        fit_min_override=0.75,
+        fit_max_override=1.15,
         title=title + " : EB PID all"
     )
 
@@ -737,9 +746,9 @@ def contamination_pipeline(
     fake_result, fake_fig = gaussian_fitter(
         df_epiN[cutMask],
         output_png=True,
-        peak_width=peak_width,
-        title=title + " : EB K + BDT",
-        Rlim=1.05
+        fit_min_override=0.75,
+        fit_max_override=1.07,
+        title=title + " : EB K + BDT"
     )
 
 
@@ -748,7 +757,8 @@ def contamination_pipeline(
     pion_result, pion_fig = gaussian_fitter(
         df_epiN[df_epiN["pid"] == 211],
         output_png=True,
-        peak_width=peak_width,
+        fit_min_override=0.75,
+        fit_max_override=1.15,
         title=title + " : EB PID pions"
     )
 
@@ -908,7 +918,7 @@ mx_plots=[]
 metric_plots=[]
 
 
-outDir="../../figures/Data_Application/epiN/thinner/"
+outDir="../../figures/Data_Application/epiN/shifts/"
 plot_mx_histogram(df)
 
 
@@ -1410,7 +1420,6 @@ print("performing MC corss-check")
 cols.append("mc_matching_pid")
 df_mc = uproot.open("~/ML_Files/MC_scored/pid_training_v2.root:PhysicsEvents").arrays(cols, library="pd")
 
-df_data = uproot.open("~/ML_Files/MC_scored/pid_training_v2.root:PhysicsEvents").arrays(cols, library="pd")
 df_pass_mc=df_mc[df_mc["bdt_pass"]==True]
 
 

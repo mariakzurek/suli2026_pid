@@ -87,8 +87,13 @@ pEdges = np.linspace(P_LO, P_HI, P_NBINS + 1)
 def calc_contamination(candidates):
     """
     candidates: rows already selected as kaon candidates
-    (pid == 321 & bdt_pass == True). Returns the fraction with
-    rich_best_PID != 321.
+    (pid == 321 & bdt_pass == True).
+
+    Returns:
+        contamination,
+        contamination_err
+
+    contamination = fraction with rich_best_PID != 321
     """
 
     numerator_df = candidates[candidates["rich_best_PID"] != 321]
@@ -97,9 +102,18 @@ def calc_contamination(candidates):
     denominator = len(candidates)
 
     if denominator == 0:
-        return 0
+        return 0, 0
 
-    return numerator / denominator
+    contamination = numerator / denominator
+
+    if numerator > 0:
+        contamination_err = contamination * np.sqrt(
+            (1 / numerator) + (1 / denominator)
+        )
+    else:
+        contamination_err = 0
+
+    return contamination, contamination_err
 
 
 def contamination_for_threshold(rich_rq_threshold):
@@ -128,8 +142,14 @@ def contamination_for_threshold(rich_rq_threshold):
                 (pBin["pid"] == 321)
                 & (pBin["bdt_pass"] == True)
             ]
-            r = calc_contamination(candidates)
-            rowResults.append(r)
+            r, r_err = calc_contamination(candidates)
+
+            rowResults.append(
+                (
+                    r,
+                    r_err
+                )
+            )
 
         results.append(rowResults)
 
@@ -155,8 +175,9 @@ for i in range(THETA_NBINS):
     for j in range(P_NBINS):
         p_lo, p_hi = pEdges[j], pEdges[j + 1]
 
-        cont_init = initial_results[i][j]
-        cont_shift = shifted_results[i][j]
+        cont_init, cont_init_err = initial_results[i][j]
+        cont_shift, cont_shift_err = shifted_results[i][j]
+
         delta_c = abs(cont_shift - cont_init)
 
         rows.append({
@@ -164,8 +185,13 @@ for i in range(THETA_NBINS):
             "theta_hi": theta_hi,
             "p_lo": p_lo,
             "p_hi": p_hi,
+
             "contamination_initial": cont_init,
+            "contamination_initial_err": cont_init_err,
+
             "contamination_shifted": cont_shift,
+            "contamination_shifted_err": cont_shift_err,
+
             "delta_c": delta_c,
         })
 
