@@ -31,7 +31,7 @@ from baseline_chi2pid import passes_kplus_chi2pid_cut
 
 
 
-peak_width=0.15
+peak_width=0.1
 
 
 def gauss_poly(x, A, mu, sigma, m, b):
@@ -88,7 +88,7 @@ def gaussian_fitter(df, output_png=False, peak_width=peak_width, title=None, Rli
 
     fit_min = neutron_mass - peak_width
     fit_max = neutron_mass + peak_width
-    if ((Rlim!=0)&(fit_max>Rlim)):
+    if ((Rlim!=0)&(fit_max>Rlim)&(fit_min<Rlim)):
         fit_max=Rlim
 
 
@@ -908,7 +908,7 @@ mx_plots=[]
 metric_plots=[]
 
 
-outDir="../../figures/Data_Application/epiN/"
+outDir="../../figures/Data_Application/epiN/thinner/"
 plot_mx_histogram(df)
 
 

@@ -24,6 +24,8 @@ https://github.com/mariakzurek/clas12_analysis_software (branch `suli_kaon_pid`,
 
 That repo runs on ifarm to produce the training/analysis ntuples that this repo consumes.
 
+All ML-related files, model cards, datasets, ect that were used in this study can be found at /work/clas12/CooperBe/MLStuff/ on ifarm.
+
 ## Quick start
 
 **For interactive notebook work** (recommended for Week 1):

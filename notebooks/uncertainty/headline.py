@@ -2,6 +2,9 @@ import pandas as pd
 import numpy as np
 import os
 import matplotlib.pyplot as plt
+from matplotlib.ticker import PercentFormatter
+
+from matplotlib.backends.backend_pdf import PdfPages
 
 
 def make_systematic_quadrature_table(csv_files, output_md="systematic_table.md"):
@@ -15,7 +18,7 @@ def make_systematic_quadrature_table(csv_files, output_md="systematic_table.md")
         Each CSV must contain:
         p_lo/p_low, p_hi/p_high,
         theta_lo/theta_low, theta_hi/theta_high,
-        and either relative_drift or stat_unc
+        and one of delta_c, delta_c_total, C_difference, or stat_unc
 
     output_md : str
         Output markdown filename.
@@ -64,15 +67,20 @@ def make_systematic_quadrature_table(csv_files, output_md="systematic_table.md")
         # Determine systematic column
         # ---------------------------------------------
 
-        if "relative_drift" in df.columns:
-            sys_col = "relative_drift"
+        if "delta_c" in df.columns:
+            sys_col = "delta_c"
+        elif "delta_c_total" in df.columns:
+            sys_col = "delta_c_total"
+        elif "C_difference" in df.columns:
+            sys_col = "C_difference"
 
         elif "stat_unc" in df.columns:
             sys_col = "stat_unc"
 
         else:
             raise ValueError(
-                f"{file} has neither relative_drift nor stat_unc"
+                f"{file} has none of delta_c, delta_c_total, "
+                f"C_difference, or stat_unc"
             )
 
 
@@ -181,7 +189,7 @@ def make_systematic_quadrature_table(csv_files, output_md="systematic_table.md")
         master[source] = values
 
 
-   # -------------------------------------------------
+    # -------------------------------------------------
     # Quadrature sum
     # -------------------------------------------------
 
@@ -272,6 +280,7 @@ def make_systematic_quadrature_table(csv_files, output_md="systematic_table.md")
 def plot_uncertainty_vs_momentum(
     master,
     theta_range,
+    p_range=None,
     value_col="quadrature",
     output_png="uncertainty_vs_momentum.png",
     title=None
@@ -288,6 +297,10 @@ def plot_uncertainty_vs_momentum(
         window are used. If more than one theta bin per momentum
         bin falls in the window, their values are averaged so you
         get one point per momentum bin.
+    p_range : tuple(float, float), optional
+        (p_lo, p_hi) hard limit on the momentum axis. Only bins
+        fully inside this window are plotted. If not given, all
+        momentum bins (within theta_range) are plotted.
     value_col : str
         Which column to plot on the y-axis (default: "quadrature").
     output_png : str
@@ -310,9 +323,17 @@ def plot_uncertainty_vs_momentum(
         (master.theta_hi <= theta_hi)
     ].copy()
 
+    if p_range is not None:
+        p_lo_limit, p_hi_limit = p_range
+        subset = subset[
+            (subset.p_lo >= p_lo_limit) &
+            (subset.p_hi <= p_hi_limit)
+        ]
+
     if subset.empty:
         raise ValueError(
             f"No bins found with theta fully inside {theta_range}"
+            + (f" and p fully inside {p_range}" if p_range is not None else "")
         )
 
     subset["p_center"] = (subset.p_lo + subset.p_hi) / 2
@@ -333,7 +354,8 @@ def plot_uncertainty_vs_momentum(
         linestyle=""
     )
     ax.set_xlabel("Momentum p")
-    ax.set_ylabel(value_col)
+    ax.set_ylabel(value_col+" (%)")
+    ax.yaxis.set_major_formatter(PercentFormatter(xmax=1.0))
     ax.set_title(
         title if title is not None
         else f"{value_col} vs momentum (theta in [{theta_lo}, {theta_hi}])"
@@ -344,6 +366,307 @@ def plot_uncertainty_vs_momentum(
     plt.close(fig)
 
     return plot_data
+
+
+def make_stat_uncertainty_pdf(
+    csv_files,
+    output_pdf="stat_uncertainty_plots.pdf",
+    theta_range=None,
+    p_range=None,
+):
+    """
+    Create PDF plots of uncertainty for each CSV.
+
+    Behavior:
+      - Automatically finds uncertainty column:
+            stat_unc
+            delta_c_total
+            delta_c
+            C_difference
+
+      - If stat_unc + threshold are present:
+            plot stat_unc vs threshold
+
+      - Otherwise:
+            plot uncertainty vs momentum
+
+      - Handles:
+            p_lo / p_hi
+            p_low / p_high
+
+            theta_lo / theta_hi
+            theta_low / theta_high
+
+      - Removes invalid values (9999)
+      - Averages only valid theta bins within each momentum bin
+    """
+
+    candidate_columns = [
+        "stat_unc",
+        "delta_c_total",
+        "delta_c",
+        "C_difference",
+    ]
+
+    with PdfPages(output_pdf) as pdf:
+
+        for csv_file in csv_files:
+
+            df = pd.read_csv(csv_file)
+
+            filename = os.path.splitext(
+                os.path.basename(csv_file)
+            )[0]
+
+
+            # ------------------------------------------------------------
+            # Normalize names
+            # ------------------------------------------------------------
+            rename_map = {
+                "p_low": "p_lo",
+                "p_high": "p_hi",
+                "theta_low": "theta_lo",
+                "theta_high": "theta_hi",
+            }
+
+            df.rename(
+                columns=rename_map,
+                inplace=True
+            )
+
+
+            # ------------------------------------------------------------
+            # Find uncertainty column
+            # ------------------------------------------------------------
+            value_col = None
+
+            for col in candidate_columns:
+                if col in df.columns:
+                    value_col = col
+                    break
+
+
+            if value_col is None:
+                print(
+                    f"Skipping {csv_file}: no uncertainty column found"
+                )
+                continue
+
+
+            # ------------------------------------------------------------
+            # Clean uncertainty
+            # ------------------------------------------------------------
+            df[value_col] = pd.to_numeric(
+                df[value_col],
+                errors="coerce"
+            )
+
+            df.loc[
+                df[value_col] >= 9999,
+                value_col
+            ] = np.nan
+
+
+            # ============================================================
+            # SPECIAL CASE:
+            # stat_unc threshold scan
+            # Collapse threshold variations first
+            # ============================================================
+            if value_col == "stat_unc" and "threshold" in df.columns:
+
+                df = (
+                    df
+                    .dropna(subset=[value_col])
+                    .groupby(
+                        [
+                            "p_lo",
+                            "p_hi",
+                            "theta_lo",
+                            "theta_hi"
+                        ],
+                        as_index=False
+                    )[value_col]
+                    .mean()
+                )
+
+
+                if df.empty:
+                    print(
+                        f"Skipping {csv_file}: no valid threshold points"
+                    )
+                    continue
+
+
+                fig, ax = plt.subplots(
+                    figsize=(8,6)
+                )
+
+                ax.plot(
+                    df["threshold"],
+                    df["stat_unc"],
+                    marker="o",
+                    linestyle=""
+                )
+
+                ax.set_xlabel(
+                    "Threshold"
+                )
+
+                ax.set_ylabel(
+                    "Statistical Uncertainty (%)"
+                )
+
+                ax.yaxis.set_major_formatter(
+                    PercentFormatter(xmax=1.0)
+                )
+
+                ax.set_title(
+                    f"{filename} stat uncertainty"
+                )
+
+                ax.grid(
+                    True,
+                    alpha=0.3
+                )
+
+                fig.tight_layout()
+
+                pdf.savefig(fig)
+
+                plt.close(fig)
+
+                continue
+
+
+            # ============================================================
+            # Normal momentum uncertainty plot
+            # ============================================================
+
+            required = [
+                "p_lo",
+                "p_hi",
+                "theta_lo",
+                "theta_hi",
+                value_col
+            ]
+
+            missing = [
+                c for c in required
+                if c not in df.columns
+            ]
+
+            if missing:
+                print(
+                    f"Skipping {csv_file}: missing {missing}"
+                )
+                continue
+
+
+            # ------------------------------------------------------------
+            # Theta selection
+            # ------------------------------------------------------------
+            if theta_range is not None:
+
+                theta_lo, theta_hi = theta_range
+
+                df = df[
+                    (df.theta_lo >= theta_lo)
+                    &
+                    (df.theta_hi <= theta_hi)
+                ]
+
+
+            # ------------------------------------------------------------
+            # Momentum selection
+            # ------------------------------------------------------------
+            if p_range is not None:
+
+                p_lo_limit, p_hi_limit = p_range
+
+                df = df[
+                    (df.p_lo >= p_lo_limit)
+                    &
+                    (df.p_hi <= p_hi_limit)
+                ]
+
+
+            if df.empty:
+                print(
+                    f"Skipping {csv_file}: no valid bins"
+                )
+                continue
+
+
+            df["p_center"] = (
+                df.p_lo + df.p_hi
+            ) / 2
+
+
+            plot_data = (
+                df
+                .dropna(subset=[value_col])
+                .groupby(
+                    [
+                        "p_lo",
+                        "p_hi",
+                        "p_center"
+                    ],
+                    as_index=False
+                )[value_col]
+                .mean()
+                .sort_values("p_center")
+            )
+
+
+            if plot_data.empty:
+                print(
+                    f"Skipping {csv_file}: no valid uncertainty points"
+                )
+                continue
+
+
+            fig, ax = plt.subplots(
+                figsize=(8,6)
+            )
+
+            ax.plot(
+                plot_data["p_center"],
+                plot_data[value_col],
+                marker="o",
+                linestyle=""
+            )
+
+            ax.set_xlabel(
+                "Momentum p (GeV)"
+            )
+
+            ax.set_ylabel(
+                f"{value_col} (%)"
+            )
+
+            ax.yaxis.set_major_formatter(
+                PercentFormatter(xmax=1.0)
+            )
+
+            ax.set_title(
+                f"{filename} {value_col}"
+            )
+
+            ax.grid(
+                True,
+                alpha=0.3
+            )
+
+            fig.tight_layout()
+
+            pdf.savefig(fig)
+
+            plt.close(fig)
+
+
+    print(
+        f"Saved {output_pdf}"
+    )
 
 
 files_Mc = []
@@ -366,6 +689,18 @@ files_Mc.append("per_bin_sweep_uncertianties.csv")
 files_RICH.append("rich_contamination_binned.csv")
 files_Mx.append("mx_width_sensitivity.csv")
 
+
+
+files_all=[]
+files_all.append("calibration_sensitivity.csv")
+files_all.append("weighted_contamination_comparison_granular.csv")
+files_all.append("threshold_sensitivity.csv")
+files_all.append("per_bin_sweep_uncertianties.csv")
+files_all.append("rich_contamination_binned.csv")
+files_all.append("mx_width_sensitivity.csv")
+
+make_stat_uncertainty_pdf(files_all,)
+
 # NOTE: `files` was undefined in the original script (bug) - it never
 # actually referenced any of files_Mc / files_RICH / files_Mx. Also,
 # "weighted_contamination_comparison.csv" is appended to files_Mc twice,
@@ -385,21 +720,30 @@ master_RICH = make_systematic_quadrature_table(
     output_md="systematic_table_RICH.md"
 )
 
+
+
+
+# p_range is optional - pass e.g. p_range=(0, 10) to hard-limit the
+# momentum axis for a given plot. Leave it out (or None) to plot all
+# momentum bins within theta_range, as before.
 plot_uncertainty_vs_momentum(
     master_Mc,
     theta_range=(5, 15),
+    p_range=None,
     output_png="uncertainty_vs_momentum_MC.png",
     title="Systematic Uncertainty vs Momentum, MC"
 )
 plot_uncertainty_vs_momentum(
     master_Mx,
     theta_range=(5, 20),
+    p_range=(2.75,5),
     output_png="uncertainty_vs_momentum_MX.png",
     title="Systematic Uncertainty vs Momentum, MX"
 )
 plot_uncertainty_vs_momentum(
     master_RICH,
     theta_range=(0, 20),
+    p_range=(2.75,5),
     output_png="uncertainty_vs_momentum_RICH.png",
     title="Systematic Uncertainty vs Momentum, RICH"
 )

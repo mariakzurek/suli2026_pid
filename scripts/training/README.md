@@ -274,6 +274,9 @@ python scripts/training/evaluate.py \
     --overwrite
 ```
 
+
+NOTE: ALL THESE SCRIPTS HAVE A MLP VARIATION UNDER MLPS/ THESE TAKE THE SAME COMMAND PARAMETERS
+
 ### PITFALLS
 
 - This script reads **test.parquet only**.  Do not pass a different split.
