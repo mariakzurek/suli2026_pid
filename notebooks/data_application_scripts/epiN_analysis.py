@@ -1543,6 +1543,36 @@ plt.close(fig)
 
 print("MC vs epiN-truth overlay plot saved")
 
+# ------------------------------------------------------------
+# Save contamination results as CSV
+# ------------------------------------------------------------
 
+contamination_rows = []
+
+for i in range(n_theta):
+
+    for j in range(n_p):
+
+        contamination_rows.append({
+            "p_lo": pEdges[j],
+            "p_hi": pEdges[j+1],
+            "contamination_initial": con[i][j],
+            "contamination_initial_err": con_er[i][j],
+            "theta_lo": tEdges[i],
+            "theta_hi": tEdges[i+1],
+        })
+
+
+contamination_df = pd.DataFrame(contamination_rows)
+
+contamination_csv = "../uncertainty/" + "epiN_contamination_binned_PLOTTING.csv"
+
+contamination_df.to_csv(
+    contamination_csv,
+    index=False
+)
+
+print(f"Saved contamination CSV: {contamination_csv}")
+print(contamination_df)
 
 

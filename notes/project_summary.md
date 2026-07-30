@@ -95,7 +95,7 @@ The RICH RQ had signifigant effect on the systematic uncertainty, future studies
 The next plots are for the exclusive epi(N) reaction validations:
 
 ![Main plot](../notebooks/uncertainty/pngs/uncertainty_vs_momentum_MX.png)
-![Main plot](../notebooks/uncertainty/pngs/contamination_with_syst_MX.png)
+![Main plot](../notebooks/uncertainty/pngs/contamination_MX_from_csv.png)
 
 The systematic uncertainty is highly sensitive to the Mx fitting window, epiN_analysis.py should be used to exam each individual fit when interpreting results during development.
 

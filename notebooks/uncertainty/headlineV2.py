@@ -989,9 +989,10 @@ def compute_contamination_vs_momentum(
 def compute_contamination_from_csv(
     contamination_csv,
     syst_csv,
-    p_range,
+    p_range=None,
     num_bins=10,
     syst_value_col="quadrature",
+    use_csv_binning=False,
     output_csv="contamination_from_csv.csv",
     output_png="contamination_from_csv.png",
     title="Contamination vs momentum",
@@ -1005,15 +1006,30 @@ def compute_contamination_from_csv(
         contamination_initial
         contamination_initial_err
 
-    The input CSV does not need uniform binning.
-    Uniform momentum bins are created and overlapping bins are averaged.
+    Parameters
+    ----------
+    contamination_csv : str
+        CSV containing contamination values.
 
-    The statistical uncertainty is taken directly from the input CSV:
+    syst_csv : str
+        CSV containing systematic uncertainties.
+
+    p_range : tuple
+        (p_min, p_max) range for uniform bins.
+        Ignored if use_csv_binning=True.
+
+    num_bins : int
+        Number of uniform momentum bins.
+        Ignored if use_csv_binning=True.
+
+    use_csv_binning : bool
+        If True, use the original CSV binning instead of creating
+        uniform momentum bins.
+
+    Statistical uncertainty:
         stat_err = average(contamination_initial_err)
 
-    Systematic uncertainty is loaded from syst_csv and converted into an
-    absolute contamination uncertainty for plotting:
-
+    Systematic uncertainty:
         syst_abs = contamination * syst_err
     """
 
@@ -1038,29 +1054,66 @@ def compute_contamination_from_csv(
 
     syst_df = pd.read_csv(syst_csv)
 
-    p_min, p_max = p_range
 
-    p_edges = np.linspace(
-        p_min,
-        p_max,
-        num_bins + 1
-    )
+    # -------------------------------------------------
+    # Determine output bins
+    # -------------------------------------------------
+
+    if use_csv_binning:
+
+        bins = (
+            df[["p_lo", "p_hi"]]
+            .drop_duplicates()
+            .sort_values("p_lo")
+            .values
+        )
+
+    else:
+
+        if p_range is None:
+            raise ValueError(
+                "p_range must be provided when use_csv_binning=False"
+            )
+
+        p_min, p_max = p_range
+
+        p_edges = np.linspace(
+            p_min,
+            p_max,
+            num_bins + 1
+        )
+
+        bins = [
+            (p_edges[i], p_edges[i+1])
+            for i in range(num_bins)
+        ]
+
 
     results = []
 
-    for i in range(num_bins):
 
-        p_lo = p_edges[i]
-        p_hi = p_edges[i + 1]
+    # -------------------------------------------------
+    # Loop over bins
+    # -------------------------------------------------
 
-        # --------------------------------
-        # Find overlapping input bins
-        # --------------------------------
+    for p_lo, p_hi in bins:
 
-        overlap = df[
-            (df["p_lo"] < p_hi) &
-            (df["p_hi"] > p_lo)
-        ]
+
+        if use_csv_binning:
+
+            # Exact CSV bin
+            overlap = df[
+                (df["p_lo"] == p_lo) &
+                (df["p_hi"] == p_hi)
+            ]
+
+        else:
+
+            # Average overlapping CSV bins
+            overlap = df[
+                (df["p_lo"] < p_hi) &
+                (df["p_hi"] > p_lo)
+            ]
 
 
         if len(overlap) > 0:
@@ -1079,9 +1132,9 @@ def compute_contamination_from_csv(
             stat_err = np.nan
 
 
-        # --------------------------------
+        # -------------------------------------------------
         # Systematic uncertainty
-        # --------------------------------
+        # -------------------------------------------------
 
         syst_overlap = syst_df[
             (syst_df["p_lo"] < p_hi) &
@@ -1126,9 +1179,9 @@ def compute_contamination_from_csv(
     print(f"Saved table to {output_csv}")
 
 
-    # --------------------------------
+    # -------------------------------------------------
     # Plot
-    # --------------------------------
+    # -------------------------------------------------
 
     fig, ax = plt.subplots(
         figsize=(8,6)
@@ -1137,10 +1190,7 @@ def compute_contamination_from_csv(
     from matplotlib.patches import Rectangle
 
 
-    # --------------------------------
-    # Systematic uncertainty boxes
-    # --------------------------------
-
+    # Systematic boxes
     for _, row in result_df.iterrows():
 
         if (
@@ -1149,9 +1199,6 @@ def compute_contamination_from_csv(
         ):
             continue
 
-
-        # Convert relative systematic uncertainty
-        # into an absolute contamination uncertainty
 
         syst_abs = (
             row["contamination"] *
@@ -1174,11 +1221,7 @@ def compute_contamination_from_csv(
         ax.add_patch(rect)
 
 
-
-    # --------------------------------
-    # Statistical uncertainty points
-    # --------------------------------
-
+    # Statistical errors
     ax.errorbar(
         result_df["p_center"],
         result_df["contamination"],
@@ -1211,9 +1254,7 @@ def compute_contamination_from_csv(
 
     ax.legend()
 
-
     fig.tight_layout()
-
 
     fig.savefig(
         output_png,
@@ -1221,7 +1262,6 @@ def compute_contamination_from_csv(
     )
 
     plt.close(fig)
-
 
     print(
         f"Saved plot to {output_png}"
@@ -1329,25 +1369,22 @@ contamination_Mc = compute_contamination_vs_momentum(
     title="Contamination with total systematic error, MC",
 )
 
+contamination_Mx = compute_contamination_from_csv(
+    contamination_csv="epiN_contamination_binned_PLOTTING.csv",
+    syst_csv="pngs/uncertainty_vs_momentum_MX.csv",
+    use_csv_binning=True,
+    output_csv="pngs/contamination_MX_from_csv.csv",
+    output_png="pngs/contamination_MX_from_csv.png",
+    title="MX Contamination",
+)
 
 
 contamination_RICH = compute_contamination_from_csv(
     contamination_csv="rich_contamination_binned.csv",
     syst_csv="pngs/uncertainty_vs_momentum_RICH.csv",
-    p_range=(2.75,5.0),
-    num_bins=10,
+    p_range=(2.75, 5),
     output_csv="pngs/contamination_with_syst_RICH.csv",
     output_png="pngs/contamination_with_syst_RICH.png",
     title="Contamination with total systematic error, RICH",
 )
 
-
-contamination_Mx = compute_contamination_from_csv(
-    contamination_csv="mx_width_sensitivity.csv",
-    syst_csv="pngs/uncertainty_vs_momentum_MX.csv",
-    p_range=(2.75, 5.0),
-    num_bins=10,
-    output_csv="pngs/contamination_MX_from_csv.csv",
-    output_png="pngs/contamination_MX_from_csv.png",
-    title="MX Contamination",
-)
