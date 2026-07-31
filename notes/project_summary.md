@@ -74,7 +74,7 @@ work/suli2026_pid/figures/Data_Application/bdt_rich_contamination.png
 
 The second method involved the use of the epi(N) exclusive reaction channel. This reaction, due to conservation of strangeness, cannot have kaons (eK(N) is not possible), as a result everything in this dataset is a true pion. Using the BDT, the ratio of the reconstructed kaons over the total number of events in the sample corresponds to the pion->kaon misidentification rate. Similarly the number of EB pions over the total number gives the EB pion efficiency. By taking the SIDIS EB pion events and dividing by the efficiency per bin gives an aproximation for true pions, then multiplying by pion->kaon misId gives a number of fake kaons, which is then used to aproximate contamination.
 ![Main plot](../figures/Data_Application/epiN/kaon_contamination_vs_p.png)
-![Main plot](../figures/mc_Data_Application/epiN/kaon_contamination_vs_p.png)
+![Main plot](../figures/Data_Application/epiN/mc_kaon_contamination_vs_p.png)
 
 These methods both show a similar performance to the MC tests within the respective kinematic regionse. Showing that the BDT improves contaminations in data as well.
 
