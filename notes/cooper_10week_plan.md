@@ -177,7 +177,7 @@ For each variable, confirm the hit-fraction (fraction of tracks with a non-missi
 
 **Step 2d — (p, θ) data/MC comparison for the reweighting decision.** *(Not completed in Week 2 — carried over into Week 3. See Week 3 for the full task description and output requirements.)*
 
-Even though `p` and `theta` are not ML training features, comparing their 2D distributions between MC and data is critical for Task 3 (Connor's reweighting). Connor's reweighting computes 2D data/MC ratios in (p, θ) bins and reweights MC events to match data; before deciding whether to use that approach, we need to know whether the distributions actually differ and by how much.
+Even though `p` and `theta` are not ML training features, comparing their 2D distributions between MC and data is critical for Task 3. Compute 2D data/MC ratios in (p, θ) bins and reweight MC events to match data; before deciding whether to use that approach, we need to know whether the distributions actually differ and by how much.
 
 Cooper must:
   - Plot the 2D (p, θ) distribution for MC (EB-K+ tracks) and for data (EB-K+ tracks) side by side, using the same binning as the analysis grid.
@@ -421,141 +421,218 @@ The `week4-tier-flexible` branch decouples dataset schema from training features
 
 ### Week 8 — MLP as second model family; final model decision; apply to data
 
-**Theme.** Three parts, sequenced. First, train the MLP as a second model family on all three formulations that exist coming out of Week 7 (binary current-p-range, binary full-p-range, 3-class full-p-range) — this is what was originally Week 6, deferred to fit around the collab meeting. Second, make the final model decision: which family (BDT or MLP), which formulation (binary vs 3-class), which threshold strategy. This is the go/no-go for the analysis application. Third, apply the chosen model to data on two SIDIS channels (`eKX` primary, `eKpX` with proton tag for the RICH-overlap cross-check) plus a separate exclusive-pion channel (`eπ⁺(n)`) that provides an independent π-mis-ID cross-check.
+**Theme.** Three parts, sequenced. First, trained the MLP as a second model family on all three formulations that existed coming out of Week 7 (binary current-p-range, binary full-p-range, 3-class full-p-range). Second, made the final model decision: family (BDT or MLP), formulation (binary vs 3-class), threshold strategy — the pipeline-freeze moment for the analysis application. Third, applied the chosen model to data on the two primary SIDIS channels (`eKX`, `eKpX`) and conducted initial RICH-overlap investigations to establish which (p, θ) bins have RICH coverage and whether the ML and RICH contamination estimates are in the right ballpark.
 
-**Prerequisite — two new data ntuples.** The SIDIS-inclusive data ntuple (`ep → eKX`, kaon-only in FD) already exists at `/volatile/clas12/zurek/SULI/data_v01/`. Part 3 needs two additional productions, neither of which exists yet, and both require Groovy work in `~/CLAS/SULI/clas12_analysis_software/processing_scripts/`:
-
-1. **SIDIS-with-proton-tag ntuple (`ep → eKpX`), for the RICH-overlap primary cross-check.** Same SIDIS event topology as `eKX` but with a detected proton in FD alongside the kaon and electron. The proton tag reduces combinatorics in the RICH-overlap region and is where the primary cross-check runs. Extend `processing_data_pid_training.groovy` (or fork a sibling — decide with Maria) and run via the existing slurm wrapper. Output to `/volatile/clas12/$USER/SULI/data_eKpX_v01/`.
-2. **Exclusive-pion ntuple (`ep → eπ⁺(n)`), for the π-mis-ID secondary cross-check.** A distinct exclusive channel: electron and π⁺ detected in FD with the recoil neutron reconstructed via missing mass and required to sit under the exclusive neutron peak. This gives a clean pion truth sample independent of the K-selection channel. The BDT is then run on this pion sample to measure how often true pions get scored as K — i.e., π-mis-ID-as-K. Write a new Groovy processing script (`processing_data_epiN.groovy` or equivalent) and run via slurm. Output to `/volatile/clas12/$USER/SULI/data_epiN_v01/`.
-
-Both productions block their respective Part-3 cross-checks; start the Groovy work Monday.
+**Prerequisite — `eKpX` data ntuple.** The SIDIS-inclusive data ntuple (`ep → eKX`, kaon-only in FD) already exists at `/volatile/clas12/zurek/SULI/data_v01/`. Part 3 needed one additional production: the **SIDIS-with-proton-tag ntuple (`ep → eKpX`)** — same SIDIS event topology as `eKX` but with a detected proton in FD alongside the kaon and electron. Groovy work in `~/CLAS/SULI/clas12_analysis_software/processing_scripts/` (`processing_data_pid_training.groovy` extended or forked). Output to `/volatile/clas12/$USER/SULI/data_eKpX_v01/`.
 
 **Cooper's tasks.**
 
 *Part 1 — MLP as second model family.*
-- Train MLPs matching all three BDT formulations from Weeks 5/7: binary current-p-range, binary full-p-range, 3-class full-p-range. `sklearn.neural_network.MLPClassifier` or a small PyTorch net, 2 hidden layers of 64 units, ReLU, Adam, early stopping. Apply `StandardScaler` first (mandatory for MLP; not needed for BDT), impute -9999 with per-feature median before scaling, add binary missing-indicator features for the physically-informative missing groups (PCAL, FTOF layer 2). Platt calibration and a reliability diagram per model.
-- Head-to-head comparison: for each of the three formulations, tabulate {BDT, MLP} × {Brier, log-loss, AUC or one-vs-rest AUC, per-bin C^π→K at matched K⁺ efficiency}. Same test set discipline as before — touched exactly once for the reported numbers.
+- Trained MLPs matching all three BDT formulations from Weeks 5/7: binary current-p-range, binary full-p-range, 3-class full-p-range. `sklearn.neural_network.MLPClassifier` or a small PyTorch net, 2 hidden layers of 64 units, ReLU, Adam, early stopping. Applied `StandardScaler` first (mandatory for MLP; not needed for BDT), imputed -9999 with per-feature median before scaling, added binary missing-indicator features for the physically-informative missing groups (PCAL, FTOF layer 2). Platt calibration and a reliability diagram per model.
+- Head-to-head comparison: for each of the three formulations, tabulated {BDT, MLP} × {Brier, log-loss, AUC or one-vs-rest AUC, per-bin C^π→K at matched K⁺ efficiency}. Same test set discipline as before — touched exactly once for the reported numbers.
 
 *Part 2 — final model decision.*
-- Pick the family, the formulation, and the threshold strategy. Write the decision and its justification in `notes/cooper_week8_model_decision.md` with the head-to-head tables as evidence. Sign-off from Maria required before Part 3 begins; this is the pipeline-freeze moment for the analysis application. Save the chosen artifact as `model_final.joblib` under `/work/clas12/$USER/SULI/models/`.
+- Picked the family, the formulation, and the threshold strategy. Decision and justification written in `notes/cooper_week8_model_decision.md` with the head-to-head tables as evidence. Maria signed off before Part 3 began. Final artifact saved as `model_final.joblib` under `/work/clas12/$USER/SULI/models/`.
 
-*Part 3 — apply to data.* Two primary SIDIS channels carry the data-side result, plus a separate exclusive-pion channel that provides an independent π-mis-ID cross-check.
-- **Primary SIDIS channel (`ep → eKX`).** Run `apply_bdt.py` (the Week-6-implementer PR) on `/volatile/clas12/zurek/SULI/data_v01/`. Apply the chosen per-bin threshold (or class-probability rule, for the 3-class case). This is the standard SIDIS channel — kaon detected in FD, no additional hadron requirement; produce ML-vs-baseline contamination-per-bin numbers as the primary data-side deliverable.
-- **SIDIS-with-proton-tag channel (`ep → eKpX`).** Once the `data_eKpX_v01/` ntuple exists (see prerequisite), run `apply_bdt.py` on it. This is also a SIDIS channel — the detected proton is a tag that reduces combinatorics in the RICH-overlap region, not an exclusivity requirement. Do not call this the "exclusive" channel; the recoil system is still `X`. The point of this channel is to enable the RICH-overlap primary cross-check below on a cleaner sample.
-- **Primary validation: RICH overlap in data (on `eKpX`).** In the (p, θ) region where the RICH is instrumented and providing PID (roughly `p > 1.75 GeV, θ < 20°`, sector 4 — reconfirm current RICH acceptance with Maria before drawing acceptance boundaries), extract the kaon-contamination number two ways on the same tracks: (a) from the MC-based ML pipeline the classifier provides, and (b) from RICH particle ID directly, using the RICH tags as near-truth-level PID. Compare bin by bin. This is the primary cross-check because RICH in its acceptance gives PID that is close to truth-level; disagreement between the ML estimate and the RICH estimate is a real result and drives Week 9's framing.
-- **Secondary validation: π-mis-ID from a separate exclusive-pion channel (`ep → eπ⁺(n)`).** This cross-check does **not** run on the K-selection channel. On the `data_epiN_v01/` ntuple, select the exclusive-pion sample by requiring the missing mass `M_X(eπ⁺)` to sit inside the neutron peak — that mass cut gives a clean sample of true π⁺ tracks essentially free of K⁺ contamination, independent of any ML or chi2pid decision. Then run the trained BDT on those pion tracks and measure how often the classifier scores them as K — i.e., the π-mis-ID-as-K rate on real data. Compare bin by bin to the MC-predicted π-mis-ID rate on true pions from the training set. Note the asymmetry explicitly in the writeup: this channel constrains only **π-mis-ID-as-K**, not proton contamination and not K efficiency. It is a secondary cross-check to RICH, not a substitute, and it is measured on a physically separate channel rather than by reading the K-selection channel's own missing-mass distribution.
+*Part 3 — apply to data; initial RICH-overlap investigations.*
+- **Primary SIDIS channel (`ep → eKX`).** Ran `apply_bdt.py` on `/volatile/clas12/zurek/SULI/data_v01/`. Applied the chosen per-bin threshold (or class-probability rule, for the 3-class case). Standard SIDIS channel — kaon detected in FD, no additional hadron requirement; produced ML-vs-baseline contamination-per-bin numbers as the primary data-side deliverable.
+- **SIDIS-with-proton-tag channel (`ep → eKpX`).** Ran `apply_bdt.py` on `data_eKpX_v01/` once the ntuple was available.
+- **Initial RICH-overlap investigations (on `eKpX` and `eKX`).** In the (p, θ) region where the RICH is instrumented and providing PID (roughly `p > 1.75 GeV, θ < 20°` for outbending, `p > 2.5 GeV, θ < 12°` for inbending, sector 4 — reconfirm current RICH acceptance with Maria before drawing acceptance boundaries), carried out a first-pass look: identified which (p, θ) bins have RICH-tagged track coverage, extracted the ML contamination estimate and the RICH-derived estimate in those bins, and established whether the two are in the right ballpark. This is a first-pass assessment, not the refined systematic treatment — that is Week 9's Thread 1.
 
 **Maria's tasks.**
-- Confirm the Groovy strategy for both new ntuple productions (`eKpX` and `eπ⁺(n)`) Monday — fork vs extend for `eKpX`; new-script for the exclusive-pion channel. Cooper is blocked on Part 3 without this.
-- Reconfirm current RICH acceptance boundaries and PID-tag conventions (`best_PID`, `RQ`, `N_photons` thresholds) before Cooper draws the RICH-overlap cross-check bins on the `eKpX` sample.
-- Confirm the exclusive-neutron mass window for the `ep → eπ⁺(n)` selection (nominal ± width) before Cooper commits the pion-truth definition.
-- Sign off on the Part-2 final model decision before Part 3 begins. This is the D6/D7 decision consolidation.
-- Mid-week check-in on the RICH cross-check preliminary numbers and the π-mis-ID cross-check preliminary numbers.
+- Confirmed the Groovy strategy for the `eKpX` ntuple production (fork vs extend) at the start of the week. Cooper was blocked on Part 3 without this.
+- Reconfirmed current RICH acceptance boundaries and PID-tag conventions (`best_PID`, `RQ`, `N_photons` thresholds) before Cooper drew the RICH-overlap bins on the `eKpX` sample.
+- Signed off on the Part-2 final model decision before Part 3 began. This is the D6/D7 decision consolidation.
+- Mid-week check-in on the RICH cross-check preliminary numbers.
 
 **Done when.**
 - MLPs trained for all three formulations; head-to-head BDT-vs-MLP comparison tables in `notes/cooper_week8_model_comparison.md`.
 - Final model decision written and signed off; `model_final.joblib` committed under `/work/`.
 - `data_eKpX_v01/` ntuple produced (SIDIS-with-proton-tag); event count and file count documented.
-- `data_epiN_v01/` ntuple produced (exclusive-pion); event count and file count documented.
-- `apply_bdt` run on the primary SIDIS channel (`eKX`); per-(p, θ)-bin ML-vs-baseline contamination table and plot committed.
-- `apply_bdt` run on the SIDIS-with-proton-tag channel (`eKpX`); RICH-overlap cross-check plot (ML contamination estimate vs RICH-derived estimate, bin by bin in the RICH acceptance) committed as the week's primary validation figure.
-- `apply_bdt` run on the exclusive-pion sample selected via the neutron-peak mass cut on `eπ⁺(n)`; π-mis-ID-as-K rate per (p, θ) bin, compared to the MC-predicted rate, committed as the secondary cross-check.
+- `apply_bdt` run on the primary SIDIS channels (`eKX`/ `eKpX`); per-(p, θ)-bin ML-vs-baseline contamination table and plot committed; initial RICH-overlap plot (first-pass ML contamination estimate vs RICH-derived estimate, bin by bin in the RICH acceptance) committed.
 
 **Risks / dependencies.**
-- Groovy work for either new ntuple (`eKpX` or `eπ⁺(n)`) slips past Monday. Severity M–H. Mitigation: start both Monday morning, not mid-week. For `eKpX`, if the extension is stuck by Tuesday, fall back to filtering the proton-tag topology out of the existing `data_v01/` ntuple in post-processing — worse cuts, larger intermediate files, but unblocks the RICH cross-check. For `eπ⁺(n)`, no post-hoc fallback is as clean: the exclusive-pion selection needs the electron-π⁺ topology that the K-selection ntuples do not carry. If that Groovy work slips, the π-mis-ID cross-check itself slips to Week 9.
-- RICH acceptance in the current data is narrower than expected and the overlap sample is statistics-starved. Severity M. Mitigation: report the bins where the comparison is statistically meaningful; do not stretch the RICH cross-check into bins where the RICH sample is < ~100 tracks. If the RICH overlap is too thin to be a primary validation, the exclusive-pion π-mis-ID cross-check becomes the primary data-side validation and RICH degrades to sanity check — flag this to Maria immediately, do not paper over.
-- Final model decision is genuinely close between BDT and MLP, or between binary and 3-class. Severity L. Mitigation: this is a real answer; pick the simpler formulation (binary BDT) unless one of the alternatives shows a decisive per-bin advantage. Document the closeness rather than manufacturing a false decisiveness.
-- ML-vs-RICH comparison disagrees. Severity M–H. Mitigation: this is real physics — one of the two is missing something. Investigate honestly: is the MC training distribution wrong in the RICH region? Is the RICH tag selection contaminated by mis-tagged tracks? Document both possibilities and do not silently prefer one.
-- Exclusive-pion sample is contaminated by non-neutron background under the mass peak. Severity M. Mitigation: the neutron-peak mass cut is not perfect; quote the residual non-pion fraction from MC and fold it into the π-mis-ID uncertainty band. If the residual is large enough to swamp the measurement, tighten the mass window and re-quote with reduced statistics.
+- Groovy work for `eKpX` slips past Monday. Severity M–H. Mitigation: start Monday morning. If the extension is stuck by Tuesday, fall back to filtering the proton-tag topology out of the existing `data_v01/` ntuple in post-processing — worse cuts, larger intermediate files, but unblocks the RICH cross-check.
+- RICH acceptance in the current data is narrower than expected and the overlap sample is statistics-starved. Severity M. Mitigation: report the bins where the comparison is statistically meaningful; do not stretch the RICH cross-check into bins where the RICH sample is < ~100 tracks.
+- Final model decision is genuinely close between BDT and MLP, or between binary and 3-class. Severity L. Mitigation: pick the simpler formulation (binary BDT) unless one of the alternatives shows a decisive per-bin advantage. Document the closeness rather than manufacturing a false decisiveness.
+- ML-vs-RICH comparison disagrees in the first-pass numbers. Severity M–H. Mitigation: this is real physics — document both possibilities (MC training distribution wrong in the RICH region; RICH tag contaminated) and carry the diagnosis into Week 9's full systematic treatment.
 
-**Fallback / scope-down.** If Part 3 slips, ship the primary SIDIS `apply_bdt` numbers on `eKX` and the RICH cross-check on `eKpX` (in whatever RICH-acceptance bins are populated); defer the exclusive-pion π-mis-ID cross-check to Week 9. If neither new ntuple is producible this week, both cross-checks slip to Week 9 and the SIDIS-inclusive `eKX` numbers become the sole data-side deliverable for Week 8.
+**Fallback / scope-down.** If Part 3 slips, ship the primary SIDIS `apply_bdt` numbers on `eKX` and `eKpX` (in whatever RICH-acceptance bins are populated); carry the initial RICH-overlap numbers into Week 9 where they become the starting point for Thread 1.
 
 ---
 
 ### Week 9 — Deep-dive validation of the W8 data pass; poster-plot finalization
 
-**Theme.** Two threads in parallel, both refinement rather than first-pass. The W8 apply-to-data run produced the first numbers on the primary SIDIS channels (`eKX` and `eKpX`) along with a first RICH-overlap cross-check on `eKpX` and a first π-mis-ID reading on the separate exclusive-pion channel (`eπ⁺(n)`). Week 9 sharpens those into defensible, publication-quality results: the RICH-vs-MC contamination comparison in the RICH-acceptance region gets its full systematic treatment as the primary validation, and the π-mis-ID cross-check on the exclusive-pion sample gets its full treatment as the secondary. In parallel, every plot destined for the CEU (or equivalent) poster is finalized this week — style, axes, labels, legends, colors, sizing. Treat plot finalization as its own workstream, not a Friday-afternoon cleanup pass on top of the analysis refinement. The two threads share Cooper's week but do not share deadlines: analysis refinement is signed off mid-week, plots are signed off by Friday.
+**Theme.** Two threads in parallel, both refinement rather than first-pass. The W8 apply-to-data run produced the first numbers on the primary SIDIS channels (`eKX` and `eKpX`) along with initial RICH-overlap investigations; Week 9 sharpens everything into defensible results. Thread 1 gives the RICH-vs-MC contamination comparison its full systematic treatment. Thread 2 executes the π-mis-ID cross-check on the exclusive-pion channel using a ratio method that stays entirely within the EB-K⁺ analysis sample — no model extrapolation to EB-π⁺ tracks required.
 
-No new model training this week. No new data production. The final model was locked in W8 Part 2; both new ntuples (`data_eKpX_v01/` and `data_epiN_v01/`) are locked coming into W9. If any of them show a defect discovered during refinement, document it and quote the effect on the number — do not retrain and do not reprocess.
+No new data production this week. The final model is locked from W8 Part 2. If a defect is discovered during refinement, document it and quote the effect on the number — do not reprocess ntuples.
 
 **Cooper's tasks.**
 
 *Thread 1 — refine the primary validation (RICH-vs-MC contamination in the RICH-acceptance region).*
-- Take the W8 first-pass RICH-overlap plot as the starting point. Redraw the RICH-acceptance boundary explicitly: confirm sector 4, `p > 1.75 GeV, θ < 20°` (or whatever Maria reconfirmed at W8 start), and shade the acceptance region on the (p, θ) map so the reader sees exactly which bins the comparison covers and which are extrapolation.
-- Build the coverage plot: per-(p, θ)-bin RICH-tagged track counts inside the acceptance, with the < ~100-track floor from W8 marked as an exclusion. Any bin below the floor drops out of the headline comparison and is called out separately as statistics-starved. Do not carry statistics-starved bins into the headline number.
+- Take the W8 initial RICH-overlap numbers as the starting point. Map the exact (p, θ) overlap between the RICH acceptance and the analysis sample: do not rely on the nominal acceptance boundaries (sector 4, approximate p and θ cuts) alone. Take the actual RICH-tagged tracks in the data sample, plot their (p, θ) distribution, and identify which analysis (p, θ) bins have ≥ some floor of RICH-tagged tracks (the ~100-track floor from W8 is the starting point; confirm the appropriate floor with Maria given the actual statistics). The acceptance boundary drawn on figures must reflect the empirical coverage in the actual sample, not the nominal design acceptance. Commit this empirical RICH-coverage map as a figure.
+- Build the coverage plot: per-(p, θ)-bin RICH-tagged track counts, with the stats floor marked as an exclusion. Any bin below the floor drops out of the headline comparison and is called out separately as statistics-starved. Do not carry statistics-starved bins into the headline number.
 - Full systematic uncertainty treatment on the ML contamination estimate in the RICH-acceptance region. Sources at minimum: (a) per-bin MC statistical uncertainty from the training/test split; (b) sensitivity to the per-bin threshold choice — vary the threshold by ± one grid step and re-quote; (c) sensitivity to the calibration — quote the number with and without Platt calibration; (d) if the (p, θ) reweighting debt from W5 is still un-resolved (see W7 risks), quote the sensitivity to including / excluding the reweighting. Systematic on the RICH-derived contamination side: (e) RICH tag purity — vary `RQ` and `N_photons` thresholds around Maria's nominal and quote the drift.
 - Agreement / disagreement diagnosis, bin by bin. For every acceptance bin above the stats floor, compute `Δ = C_ML − C_RICH` and its combined uncertainty. Classify each bin as (i) agrees within uncertainty, (ii) disagrees but the disagreement points at a specific source (training MC mismodels the RICH region, RICH tag contaminated by mis-tagged tracks, per-bin threshold under- or over-tuned), or (iii) disagrees and the source is unclear. Write the diagnosis into `notes/cooper_week9_rich_diagnosis.md` bin by bin — no averaging until every disagreeing bin has been named.
-- Produce the final headline RICH-vs-MC contamination plot: contamination-per-bin for {ML, RICH-derived} with combined error bars, acceptance boundary shaded, excluded bins greyed out. This is the primary validation figure for the report and the poster.
+- Produce the final headline RICH-vs-MC contamination plot: contamination-per-bin for {ML, RICH-derived} with combined error bars, acceptance boundary reflecting the empirical coverage, excluded bins greyed out. This is the primary validation figure.
 
-*Thread 2 — refine the secondary validation (π-mis-ID-as-K on the separate exclusive-pion channel `ep → eπ⁺(n)`).*
-- Take the W8 first-pass π-mis-ID reading as the starting point. Refine the exclusive-neutron mass-window definition on `M_X(eπ⁺)`: quantify the residual non-pion background under the peak from MC (see W8 risk), and either tighten the window or apply a sideband subtraction to remove that background from the pion-truth sample. Then re-run the trained BDT on the cleaned pion sample and re-quote the per-(p, θ)-bin π-mis-ID-as-K rate.
-- Full systematics on the π-mis-ID number: (a) vary the neutron mass-window boundaries and quote the drift; (b) if sideband subtraction is used, vary the sideband definition; (c) vary the per-bin BDT threshold by ± one grid step and re-quote (same convention as Thread 1); (d) MC statistical uncertainty on the reference π-mis-ID prediction; (e) sensitivity to Platt calibration (with vs without). Same discipline as Thread 1 — the number is only as defensible as its systematic band.
-- Re-state the asymmetry that was flagged in W8 explicitly in the writeup: this channel constrains **π-mis-ID-as-K only**, not proton contamination, not K efficiency, and not the K→π direction. This asymmetry is what makes it a secondary rather than primary validation, and it is measured on a physically separate channel — the pion sample here has nothing to do with the K-selection channel's own missing-mass distribution. Do not let poster reviewers read the plot as a full validation of the ML result.
-- Reconcile the π-mis-ID number from this channel with the RICH-derived kaon-contamination number from Thread 1 in the (p, θ) region where both are populated. The two are not directly the same quantity — the RICH number is `C^{π→K}` on the K-selection channel, and the exclusive-pion number is `M^{π→K}` on a pure-pion sample — but under the assumption that the classifier's π-mis-ID rate is a property of the classifier and not of the sample composition, the two constrain each other. If they are consistent under that assumption, that is the two-way cross-check the report leans on. If they disagree, that is a real result and joins the Thread-1 disagreement diagnosis rather than being buried.
-- Produce the final π-mis-ID plot: per-(p, θ)-bin π-mis-ID-as-K rate on the exclusive-pion sample, with MC-predicted rate overlaid and combined error bars. Save as `/figures/pi_misid_epiN_final.png`.
+*Thread 2 — the π-mis-ID cross-check via the exclusive-topology ratio method.*
 
-*Thread 3 — finalize every poster plot.*
-- Enumerate every plot destined for the CEU (or equivalent) poster in a checklist at the top of `notes/cooper_week9_poster_plots.md`. Candidates at minimum: the headline contamination-vs-(p, θ) figure (ML vs baseline on the locked model), the RICH-vs-MC comparison from Thread 1, the exclusive-pion π-mis-ID-as-K plot from Thread 2, the tier-comparison summary from W5, the per-bin FOM-threshold sweep example, and any feature-importance or reliability figure Maria wants on the poster.
-- For each plot, run the finalization pass: consistent axis label conventions (units, symbols), consistent legend placement, consistent color mapping across figures (baseline is always one color, ML always another, RICH always a third — pick once, apply everywhere), font size legible at poster print scale (rule of thumb: axis labels ≥ 14 pt after scaling), and a size / aspect that fits the poster grid Maria specifies. Save the final versions under `/figures/poster/` with names that make the poster-slot assignment obvious.
-- Print-test the poster-scale figures at least once mid-week on the largest display Cooper has access to. Screen-shrunk PNGs that read fine on a laptop routinely fall apart at poster scale — catch this Wednesday, not the night before submission.
+The π-mis-ID cross-check does not apply the BDT to EB-π⁺ tracks. Instead it stays entirely within the domain the classifier was trained on — the EB-K⁺-selected sample — and uses the `ep → eπ⁺(n)` exclusive topology as a pion-truth tag applied to that sample's output.
+
+The method: select `ep → eπ⁺(n)` events by requiring the missing mass `M_X(eπ⁺)` — computed under the pion hypothesis for the detected positive hadron — to sit inside the exclusive neutron peak. Within those events, the positive hadron carries a pion-truth tag at the event level. Count, per (p, θ) bin:
+- Denominator: all EB-labeled positive tracks (EB-K⁺, EB-π⁺, EB-p) in neutron-peak-selected events.
+- Numerator: the subset of EB-K⁺ tracks in those same events that the BDT accepts as kaons (score above the per-bin threshold).
+
+The ratio `N_numerator / N_denominator` per bin is the π-mis-ID-as-K rate — the fraction of true pions (tagged by the exclusive topology) that the BDT accepts as kaons, measured entirely within the EB-K⁺ analysis sample. No application of the model to EB-π⁺ tracks is involved.
+
+The transfer assumption: this mis-ID rate is measured in exclusive `ep → eπ⁺(n)` kinematics. Applying it to the SIDIS contamination estimate assumes the classifier's π-mis-ID rate is the same in exclusive and SIDIS events within the same (p, θ) bin. This is a reasonable assumption if the BDT input features (β, chi2pid, FTOF) carry no residual kinematic dependence beyond (p, θ), but the exclusive and SIDIS populations do not have the same Q², W, or x distributions within a bin. State this assumption explicitly in the writeup and vary the (p, θ) bin widths as a systematic to probe its stability.
+
+Maria must confirm the neutron-peak mass window (nominal ± width) before Cooper commits the pion-truth definition. Confirm the denominator definition — all EB-labeled positive hadrons in neutron-peak events, or only EB-K⁺ — with Maria before coding the ratio.
+
+Produce the final π-mis-ID plot: per-(p, θ)-bin π-mis-ID-as-K rate from the ratio method, with MC-predicted rate overlaid and combined error bars. Save as `/figures/pi_misid_epiN_final.png`. Full systematics: (a) vary the neutron mass-window boundaries and quote the drift; (b) vary the per-bin BDT threshold by ± one grid step and re-quote (same convention as Thread 1); (c) vary the (p, θ) bin widths to probe the transfer-assumption stability; (d) MC statistical uncertainty on the reference π-mis-ID prediction; (e) sensitivity to Platt calibration (with vs without).
+
+The exclusive ep \to e\pi^+(n) study does not measure SIDIS kaon contamination directly, just mis-identfication. It measures a bin-by-bin π→K mis-ID rate on a pion-truth sample. To compare that result to the RICH-derived SIDIS contamination, Cooper must propagate the exclusive-sample mis-ID rate into a SIDIS contamination estimate: estimate the true pion yield in SIDIS in each \((p,\theta)\) bin (estimate pion efficiency from exclusive extraction and multiply the N of SIDIS pions by that), multiply by the exclusive-sample π→K mis-ID rate, and divide by the number of BDT-selected kaons in SIDIS. The comparison quantity is therefore the predicted SIDIS pion contamination derived from the exclusive channel. This comparison assumes that the π→K mis-ID rate transfers from the exclusive sample to SIDIS within a fixed \((p,\theta)\) bin; that assumption must be stated explicitly and treated as a systematic.
+
+*Thread 3 — finalize every report plot.*
+- Enumerate every plot destined for the CEU (or equivalent) report in a checklist at the top of `notes/cooper_week9_report_plots.md`. Candidates at minimum: the headline contamination-vs-(p, θ) figure (ML vs baseline on the locked model), the RICH-vs-MC comparison from Thread 1, the exclusive-pion π-mis-ID-as-K plot from Thread 2, the tier-comparison summary from W5, the per-bin FOM-threshold sweep example, and any feature-importance or reliability figure Maria wants on the report.
+- For each plot, run the finalization pass: consistent axis label conventions (units, symbols), consistent legend placement, consistent color mapping across figures (baseline is always one color, ML always another, RICH always a third — pick once, apply everywhere), font size legible at report print scale (rule of thumb: axis labels ≥ 14 pt after scaling), and a size / aspect that fits the report grid Maria specifies. Save the final versions under `/figures/report/` with names that make the report-slot assignment obvious.
 
 **Maria's tasks.**
-- Reconfirm the RICH-acceptance boundary at Monday's start, before Cooper draws Thread-1 systematic bands on a moving target.
+- Monday morning: confirm the neutron-peak mass window (nominal ± width) for the Thread-2 pion-truth selection, and confirm the denominator definition for the ratio (all EB-labeled positive hadrons in neutron-peak events, or only EB-K⁺). Thread 2 cannot start correctly until both are settled.
+- Reconfirm the RICH-acceptance boundary for Thread 1 at Monday's start — specifically, confirm whether the empirical coverage map from the actual RICH-tagged tracks in the sample should be the operative boundary going forward, or whether the nominal design acceptance still applies in some regions.
 - Sign off on the RICH-vs-MC disagreement diagnosis (Thread 1) mid-week before Cooper commits to the final systematic band. Bins classified as "disagrees, source unclear" need Maria's read before they are quoted in the report.
-- Confirm the poster plot list (Thread 3) at the start of the week so Cooper is not finalizing plots that end up cut from the layout.
-- Review the finalized poster plots by end-of-day Friday. Comments on style / labeling come Friday, not the following week — Week 10 is polish and submission, not another round of plot revision.
+- Confirm the report plot list (Thread 3) at the start of the week so Cooper is not finalizing plots that end up cut from the layout.
+- Review the finalized report plots by end-of-day Friday. Comments on style / labeling come Friday, not the following week — Week 10 is polish and submission, not another round of plot revision.
 
 **Done when.**
 - `notes/cooper_week9_rich_diagnosis.md` written, with per-bin agreement / disagreement classification and named sources for every disagreeing bin.
-- Final RICH-vs-MC contamination plot in `/figures/rich_vs_mc_final.png` with acceptance shaded, excluded bins greyed, combined error bars.
-- Final exclusive-pion π-mis-ID-as-K plot in `/figures/pi_misid_epiN_final.png` with MC-predicted rate overlaid and combined error bars.
-- Reconciliation between the RICH-derived kaon-contamination number and the exclusive-pion π-mis-ID-as-K number documented in the diagnosis note, with the asymmetry-of-quantities caveat spelled out.
+- Empirical RICH-coverage map (actual RICH-tagged track counts per (p, θ) bin in the data sample) committed as a figure, with the analysis bins excluded below the stats floor explicitly identified.
+- Final RICH-vs-MC contamination plot in `/figures/rich_vs_mc_final.png` with empirical acceptance boundary, excluded bins greyed, combined error bars.
+- Per-(p, θ)-bin π-mis-ID-as-K rate from the exclusive-topology ratio method in `/figures/pi_misid_epiN_final.png`, compared bin by bin to the MC-predicted rate, with the transfer assumption stated and its (p, θ)-binning sensitivity quantified.
+- Reconciliation between the RICH-derived kaon-contamination number and the ratio-method π-mis-ID-as-K number documented in the diagnosis note, with the asymmetry-of-quantities caveat spelled out.
 - `notes/cooper_week9_poster_plots.md` checklist complete; every listed plot has a finalized version under `/figures/poster/`.
 - Mid-week print-test of poster-scale figures performed and any layout / legibility issues logged.
 
 **Risks / dependencies.**
-- RICH-vs-MC disagreement is large in more than a couple of bins and the sources are unclear. Severity M–H. Mitigation: this is the same honesty rule as W8 — the disagreement is a finding, not a failure. If diagnosis stalls, quote the disagreement as a systematic uncertainty on the ML result rather than manufacturing a false agreement. Maria decides mid-week whether unresolved disagreement gets its own section in the report.
-- Systematic uncertainty treatment on the ML side balloons into a Week-long rabbit hole. Severity M. Mitigation: the five sources listed in Thread 1 are the scope; additional sources are noted as future work in the writeup rather than pursued this week. If (p, θ) reweighting was never resolved upstream, quote the sensitivity band and stop — do not turn W9 into a reweighting rescue.
+- RICH-vs-MC disagreement is large in more than a couple of bins and the sources are unclear. Severity M–H. Mitigation: the disagreement is a finding, not a failure. If diagnosis stalls, quote the disagreement as a systematic uncertainty on the ML result. Maria decides mid-week whether unresolved disagreement gets its own section in the report.
+- Systematic uncertainty treatment on the ML side balloons into a Week-long rabbit hole. Severity M. Mitigation: the five sources listed in Thread 1 are the scope; additional sources are noted as future work in the writeup. If (p, θ) reweighting was never resolved upstream, quote the sensitivity band and stop.
 - Poster plots proliferate beyond what fits the layout. Severity L. Mitigation: Maria's Monday confirmation of the plot list is the scope gate. New plots after Monday require an explicit swap-out, not an addition.
-- The exclusive-pion π-mis-ID cross-check produces a number inconsistent with the RICH cross-check in the shared (p, θ) region under the "classifier π-mis-ID is a sample-independent property" assumption. Severity M. Mitigation: this joins the Thread-1 disagreement diagnosis and is documented, not resolved by picking one number over the other. If the disagreement is systematic, that assumption itself may be wrong — flag it explicitly rather than averaging past it.
+- The transfer assumption (exclusive → SIDIS mis-ID) may break within a bin if the exclusive and SIDIS pion populations sit in different sub-regions of feature space. Severity M. Mitigation: quote the bin-by-bin sensitivity to the transfer assumption via the (p, θ) bin-width variation; if the per-bin statistics are insufficient to probe it, state it as an unquantified systematic rather than assuming it away.
+- The exclusive-pion π-mis-ID cross-check produces a number inconsistent with the RICH cross-check in the shared (p, θ) region. Severity M. Mitigation: this joins the Thread-1 disagreement diagnosis and is documented, not resolved by picking one number over the other. If the disagreement is systematic, the transfer assumption itself may be the culprit — flag it explicitly.
 
-**Fallback / scope-down.** If Thread 1 systematics stall, ship the RICH-vs-MC plot with the statistical-only error bars and a documented list of un-quantified systematics; the primary-validation claim degrades to "consistent within stats" rather than "consistent within full systematics." If Thread 3 slips, prioritize the headline contamination plot, the RICH-vs-MC plot, and the exclusive-pion π-mis-ID plot; everything else on the poster can be finalized early Week 10. Do not drop either the RICH or the exclusive-pion cross-check — they are the primary and secondary validations of the whole result, not scope-down candidates.
+**Fallback / scope-down.** If Thread 1 systematics stall, ship the RICH-vs-MC plot with statistical-only error bars and a documented list of un-quantified systematics; the primary-validation claim degrades to "consistent within stats" rather than "consistent within full systematics." If Thread 2 statistics are too thin in some bins (small neutron-peak yield in EB-K⁺ events), restrict the ratio measurement to bins with adequate statistics and call out the excluded bins explicitly. If Thread 3 slips, prioritize the headline contamination plot, the RICH-vs-MC plot, and the exclusive-pion π-mis-ID plot; everything else on the poster can be finalized early Week 10. Do not drop either the RICH or the exclusive-pion cross-check — they are the primary and secondary validations of the whole result.
 
 ---
 
-### Week 10 — Report final; poster final; handoff
+### Week 10 — Systematics; write-up; presentation; handoff
 
-**Theme.** Polish. Submit.
+---
 
-**Cooper's tasks.**
-- Report final pass. Address all of Maria's comments. Add missing figures, redo any plot that's substandard. Aim for the report to be self-contained — a stranger should be able to read it and understand what was done.
-- Poster final pass. Print test (one full-size print on Monday so any layout issues surface early).
-- Code repo cleanup. README rewrite. One-command training reproducibility test (delete everything, re-clone, re-run, confirm same model). Tag a release.
-- Practice talk for SULI symposium. Maria + 1-2 lab members as audience.
-- Handoff document: 2-page memo to whoever picks this up next (likely a future SULI student or graduate student). What works, what doesn't, what's the next obvious thing to try.
+**Task A — Systematic uncertainties (Monday–Tuesday, highest priority)**
 
-**Maria's tasks.**
-- Final report review.
-- Attend practice talk.
-- Submit poster to SULI symposium per DOE deadline.
+
+*Source 1 — MC statistical uncertainty per (p, θ) bin.* The per-bin pion contamination is C^{π→K} = N(π→K) / [N(K→K) + N(π→K) + N(p→K)]. The statistical uncertainty is binomial: σ = sqrt(C*(1-C)/N_total_bin). Per-bin counts are already in the test-set CSV at `figures/full_range/evaluate_outputs/per_bin_sweep.csv`. Read N from that file, compute σ for every bin, add a `stat_unc` column. This you probably already pop
+
+*Source 2 — Threshold sensitivity.* The per-bin FOM-optimized thresholds live in `figures/full_range/optimized_thresholdsV3.csv` (or V4 — use whichever is most recent). For each bin, take the optimal threshold t*, shift it by ±0.05 (one typical grid step), re-evaluate C^{π→K} using the test-set scores already in memory — no retraining, just recount — and record |ΔC|. This is a loop over bins in a notebook or short script; call the output `threshold_sensitivity.csv`.
+
+*Source 3 — Calibration sensitivity.* The model wrapper in `model.joblib` stores the Platt-calibrated classifier. To recover the uncalibrated score, access the inner LightGBM object via `model["model"].calibrated_classifiers_[0].base_estimator.predict_proba(X)` — this is the scikit-learn 1.5.x attribute path for `CalibratedClassifierCV` with `cv='prefit'`; verify the attribute chain interactively before running in bulk, because the path differs slightly between sklearn versions. Run `evaluate.py` logic on uncalibrated scores using the same per-bin thresholds; record the difference in C^{π→K} per bin. If the difference is smaller than the MC statistical uncertainty in every bin, state that calibration has negligible effect and move on. Do not spend more than half a day on this source.
+
+*Source 4 — (p, θ) reweighting — the outstanding debt.* This is the most consequential source to handle carefully. The BDT was trained on uniformly weighted MC. The data/MC (p, θ) ratio, plotted in Week 4 at `figures/feature_audit/ptheta_data_mc_ratio.png`, encodes how much the EB-K⁺ track distribution in data differs from MC across (p, θ) space. Connor's reweighting was never applied. The question is how much that omission moves the contamination numbers.
+
+Estimate the effect without retraining: load the test-set parquet; for each event, look up its (p, θ) bin and read the data/MC ratio from the Week-4 map. If the ratio map was saved only as a PNG and not as a CSV, recompute the ratios from the audit summary CSVs in `figures/feature_audit/` before Monday afternoon — check first. Apply the per-event ratio as a sample weight when computing C^{π→K} on the test set (a simple weighted average over the test events in each bin). Compare weighted vs unweighted C^{π→K} per bin. If the weighted and unweighted numbers agree within the threshold-sensitivity band from Source 2, reweighting is a negligible systematic for this study — state that explicitly. If they differ by more than the threshold band, record the difference per bin and report it as: "unquantified systematic: MC/data (p,θ) reweighting not applied to training; estimated effect on contamination = X% in bin Y." Do not spend more than half a day on this estimation regardless of outcome. If the estimation itself cannot be completed in that time, quote the source as "not evaluated; the Week-3 ratio map was approximately flat; expected to be comparable to the threshold systematic" and move on. The write-up and talk do not block on this — they block on the total table existing.
+
+*Source 5 — RICH tag purity (for RICH-acceptance bins only)*. Vary it by ±1 step (e.g., if nominal is RQ>0.2, try RQ>0.3, statistics permitting). For each variation, recount the RICH-derived contamination estimate in each RICH-acceptance bin and record the drift.
+
+*Source 6 — Neutron mass window (for the exclusive-pion cross-check only).* Vary the window boundaries by ±1σ of the peak width and recount the pion-truth-tagged sample in each bin. Record the drift in the π-mis-ID rate. If the neutron peak is narrow and well-separated from background the drift will be small — state that. 
+
+*Output of Task A.* A single Markdown file `notes/systematics_summary.md` with one table per source: columns = {(p,θ) bin, nominal C^{π→K}, systematic shift ΔC, relative shift ΔC/C}. The total systematic per bin is the sum in quadrature of all six sources. Add a final summary column with the quadrature total. This file feeds directly into the write-up and the presentation. Maria reviews and signs off on the total band before the write-up begins — the sign-off is a mid-week gate, not an end-of-week formality.
+
+---
+
+**Task B — README and repository cleanup (Tuesday–Wednesday)**
+
+The repository has accumulated notebooks, backup files, and figures directories from ten weeks of iterative work. Before the write-up and handoff, it must be navigable by someone who was not present. This task is not optional polish; a new group member reading the repo in six months should be able to reproduce the trained model without asking anyone a question.
+
+*Top-level README (`suli2026_pid/README.md`).* Rewrite to include: (1) a one-paragraph project summary; (2) environment setup (`conda env create -f environment.yml`); (3) the four-step pipeline in order — ntuple production → dataset build → BDT training → evaluation — with the exact commands and the output each step produces; (4) pointer to the locked model location on `/work/clas12/`; (5) pointer to `notes/` for decision records and `figures/full_range/` for the canonical production plots.
+
+*Scripts README (`scripts/README.md`).* Verify it accurately describes the current `audit_species.py` flags, the KEEP/CANDIDATE/DROP thresholds, and the column schema. Update any stale paths or flag names. If any flag name changed after the README was last edited, fix it now — do not leave a README that contradicts the script it describes.
+
+*Training README (`scripts/training/README.md`).* Verify it describes the `build_dataset.py → train_bdt.py → evaluate.py` pipeline with the current flags. Add a note that `feature_list.txt` is deprecated; the production model uses `features_tier2.txt`. Add the `apply_bdt.py` step and its flags.
+
+*Slurm READMEs (`slurm/README.md`, `slurm/README_training.md`).* Verify paths, partition, and account. Add a one-liner on the PYTHONPATH-collision convention: do not `module load clas12` in Python-only training jobs.
+
+*Cleanup.* The BACKUP_* files in `scripts/training/multiclass/` should either be deleted (with a commit message that names them and explains they are superseded) or have a comment added at the top of each file saying "historical snapshot from [date] — not in production pipeline." Do not leave them silently stale. The `figures/` directory has subdirectories from iterative work (OLD/, efficienciesOLD/, and similar). Do not delete figures. Instead, create `figures/README.md` that maps each subdirectory to the week it came from and identifies `figures/full_range/evaluate_outputs/` as the canonical production-model output directory.
+
+---
+
+**Task C — Short illustrated write-up (Wednesday–Thursday)**
+
+Save as `notes/project_summary.md`. The target is a self-contained analysis note — 4–6 pages when rendered — with actual prose and embedded figures. Not a lab notebook, not bullet points. Seven sections in order.
+
+**Introduction (half page).** What problem this solves: the EB + chi2pid baseline misidentifies π⁺ as K⁺ at a rate that limits K⁺ analyses at CLAS12, particularly at high momentum. One sentence on what was built and what training sample it uses.
+
+**Dataset and feature audit (half page).** The MC and data samples: clasdis RICH-on, RGA Fa18 inbending pass-2. The audit methodology in one paragraph — three drift metrics, 9 (p,θ) cells, KEEP/CANDIDATE/DROP. 
+
+**Classifier (half page).** Tier 2 feature set: `beta`, `ftof_energy_1B`, `ftof_time_1B`, `ftof_path_1B`, `chi2pid`, `ecin_path`, `ecin_energy`, `ecin_time`. LightGBM BDT with fixed hyperparameters. Per-(p,θ)-bin FOM threshold optimization on the validation set. Platt calibration. Embed `figures/full_range/reliability_diagram.png`.
+
+**Results on MC (one page).** C^{π→K} and ε^K as a function of (p,θ): BDT at matched efficiency vs chi2pid baseline. Embed `figures/full_range/evaluate_outputs/contam_vs_ptheta_baseline_vs_bdt.png` and `contamination_BDT_vs_chi2pid.png`. Quote the headline number: at matched K⁺ efficiency, what is the contamination reduction in the best and worst bins. Be honest about bins where the improvement is marginal.
+
+**Data validation (one page).** Two subsections. First, RICH cross-check: which (p,θ) bins have RICH coverage in the data sample; what the RICH-derived contamination estimate is in those bins vs the ML estimate; whether they are consistent; quote Δ = C_ML − C_RICH and whether it is within combined uncertainty. Second, exclusive-pion π-mis-ID: the ep→eπ⁺(n) neutron-peak method; the ratio N(BDT-accepted EB-K⁺ in neutron-peak events) / N(all positive hadrons in neutron-peak events) per bin; MC prediction vs data measurement; the transfer assumption stated explicitly.
+
+**Systematic uncertainties (half page).** Reproduce the table from `notes/systematics_summary.md`. One paragraph on the reweighting debt: "The (p,θ) data/MC reweighting was not applied at training time. The estimated effect on C^{π→K} is X%." If the reweighting effect is smaller than the threshold systematic, state that it is subdominant.
+
+**Conclusions and next steps (quarter page).** What was demonstrated. What a follow-up study would do first: apply (p,θ) reweighting, extend validation to the full SIDIS analysis channel, retrain on a larger data ntuple when one is available.
+
+Every figure path in the write-up must point to a file that exists in the repo. Before finalizing `project_summary.md`, run `ls` on every embedded figure path. Do not write placeholder paths. Figures must come from `figures/full_range/evaluate_outputs/` and `figures/full_range/` — those are the canonical production-model outputs. Do not use figures from `figures/optimized/` or `figures/Baselines/` except as clearly labeled supplementary material.
+
+---
+
+**Task D — Presentation deck additions (Thursday)**
+
+The CLAS12 presentation deck already covers Weeks 1–5 material. Cooper adds slides covering the second half of the project. Do not redesign existing slides — new slides only, appended. Each slide carries one key figure and 2–3 bullet takeaways. 
+
+1. **Full-range BDT result.**  Takeaways: headline contamination reduction, how it varies with (p,θ), which bins are marginal. Speaker note: set up the comparison protocol — matched efficiency, per-bin FOM threshold — and state the headline reduction number directly.
+
+2. **Per-theta contamination slices.** Takeaways: the improvement is strongest in the low-theta slice; high-theta shows [pattern].
+
+3. **RICH cross-check.** Figure: the RICH-vs-ML contamination comparison plot from the Week 9 validation work (whichever file exists). Takeaways: data agrees with MC prediction within [X]%; the bins where the agreement holds; any bin where it does not. Include kinematic coverage of RICH, so it is clear in what region can we use it as "true" information.
+
+4. **Exclusive-pion cross-check.** Figure: the π-mis-ID rate from the ep→eπ⁺(n) ratio method. Takeaways: data-driven mis-ID rate consistent with MC prediction; the transfer assumption; the (p,θ) coverage. Include kinematic coverage of this method, so it is clear in what region can we use it as "true" information.
+
+
+5. **Systematic uncertainty summary.** A table slide: one row per source (MC stat, threshold, calibration, reweighting, RICH tag purity, neutron window), columns = source name and ΔC/C per bin range. Takeaways: which source dominates; what the total quadrature systematic is. 
+
+6. **Conclusions and next steps.** Three bullets maximum. What the classifier delivers for the `ep → e' p K+ X` analysis. What comes next. 
 
 **Done when.**
-- Report final, PDF, committed to repo as `report_final.pdf`.
-- Poster final, PDF, submitted.
-- Repo tagged `v1.0`.
-- Handoff memo written.
-- SULI symposium talk delivered.
+- `notes/systematics_summary.md` exists with a per-bin table covering all six sources and a quadrature-total column. Maria has signed off on the total systematic band.
+- `notes/project_summary.md` written, renders cleanly in a Markdown viewer, and every embedded figure path resolves to a file that exists in the repo.
+- Top-level `suli2026_pid/README.md` rewritten and accurate.
+- `scripts/README.md`, `scripts/training/README.md`, `slurm/README.md`, `slurm/README_training.md` verified and updated.
+- `figures/README.md` created with subdirectory map.
+- CLAS12 presentation deck has six new slides with speaker notes.
+- Repo tagged `v1.0` after the README and cleanup commits land.
+- CLAS12 poster presented on Thursday. Slides submitted or presented at Friday CLAS group meeting.
+
+**Maria's tasks.**
+- Monday morning: confirm the nominal RQ threshold for RICH tag purity (Source 5) and the neutron-peak M_X(eπ⁺) window (Source 6) before Cooper codes those systematics. Both inputs are needed before noon Monday.
+- Mid-week: review `notes/systematics_summary.md` and sign off on the total systematic band before it goes into the write-up. Bins classified as "disagrees, source unclear" from the Week 9 diagnosis need Maria's read before the table is finalized.
+- Thursday: review the six new presentation slides and speaker notes.
 
 **Risks / dependencies.**
-- Cooper runs out of time on polish. Severity M. Mitigation: have a "minimum viable poster" version ready by Wednesday. Polish on top of a working version, not from scratch.
+- Reweighting estimation (Source 4) requires reading the (p,θ) ratio map produced in Week 3. If that map was saved only as a PNG and not as a CSV, Cooper must recompute the per-bin ratios from the audit summary CSVs in `figures/feature_audit/` before Monday afternoon. Check first; recomputing is straightforward if the audit CSVs have the per-bin MC and data counts.
+- Calibration sensitivity (Source 3): the `model["model"].calibrated_classifiers_[0].base_estimator` attribute path is correct for scikit-learn 1.5.x with `CalibratedClassifierCV(cv='prefit')`. Check the path in an interactive session before running in bulk. If the path differs, the fix is one line, but discovering it mid-run wastes time.
+- Write-up figure paths must point at files that actually exist in the repo. Before committing `project_summary.md`, verify every path with `ls`. Do not write placeholder paths and intend to fix them later.
 
-**Fallback / scope-down.** Cut the practice talk if time-critical. Cut the handoff memo length to 1 page.
+
+**Fallback / scope-down.** If Source 4 (reweighting) takes more than half a day, quote it as "not evaluated; expected to be comparable to threshold systematic based on the approximate flatness of the Week-3 ratio map" and move on. Do not let the reweighting estimation block the write-up. If any systematic source cannot be evaluated in the available time, list it in `systematics_summary.md` as "not evaluated" with a reason — that is an honest accounting and is better than a table that silently omits a source.
 
 ---
 
 ## 5. Decision points table
 
-| # | Decision | By when | Who decides | What depends on it |
+| # | Decision | By when | Who decides | What depends on it |ß
 |---|---|---|---|---|
 | D1 | Confirm Cooper's ifarm paths to clasdis MC and RGA pass-2 data | Week 1 Day 1 | Maria + Cooper | All processing work, all weeks |
 | D2 | RICH bank present and non-empty on clasdis MC | Week 1 Day 2 | Cooper (verification) | Whether RICH cross-checks are available at all |

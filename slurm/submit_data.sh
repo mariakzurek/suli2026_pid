@@ -68,7 +68,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 FRAMEWORK="${REPO_ROOT}/clas12_analysis_software"
 
 DATA_INPUT_DIR="/cache/clas12/rg-a/production/recon/fall2018/torus-1/pass2/main/train/nSidis"
-OUTPUT_DIR="/volatile/clas12/${USER}/SULI/data_v01"
+OUTPUT_DIR="/work/clas12/CooperBe/MLStuff/data_v02"
 FILE_LIST="${SCRIPT_DIR}/_data_file_list.txt"
 ARRAY_SCRIPT="${SCRIPT_DIR}/_pid_training_array.sh"
 

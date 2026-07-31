@@ -35,7 +35,7 @@ kinematics =["Mx_eKX","Mx_epiX","Mx_epX", "Q2", "W", "y"]
 for kin in kinematics:
     cols.append(kin)
     
-df = uproot.open("~/ML_Files/epkx_data/scored_large/epkx_dataset_large.root:PhysicsEvents").arrays(cols, library="pd")
+df = uproot.open("~/ML_Files/epkx_data/scored_larger/larger.root:PhysicsEvents").arrays(cols, library="pd")
 df=df[df["rich_best_ntot"]>2]
 df=df[df["rich_RQ"]>0.1]
 df=au.apply_Sidis_Cuts(df)

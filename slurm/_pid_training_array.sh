@@ -25,7 +25,7 @@
 # SLURM DIRECTIVES
 # ─────────────────────────────────────────────────────────────────────────────
 #SBATCH --job-name=pid_train
-#SBATCH --time=00:45:00
+#SBATCH --time=01:30:00
 #SBATCH --mem=4G
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
@@ -198,7 +198,7 @@ ln -sf "${INPUT_HIPO}" "${INPUT_DIR}/${OUTPUT_STEM}.hipo"
 # ── Intermediate and final output paths ──────────────────────────────────────
 OUTPUT_TXT="${SCRATCH}/${OUTPUT_STEM}.txt"
 OUTPUT_ROOT="${SCRATCH}/${OUTPUT_STEM}.root"
-FINAL_DIR="/volatile/clas12/${USER}/SULI/${SAMPLE}_v01"
+FINAL_DIR="/work/clas12/CooperBe/MLStuff/data_v02"
 FINAL_ROOT="${FINAL_DIR}/${OUTPUT_STEM}.root"
 
 # Output directory must exist (created by submit_*.sh, but guard here too)
