@@ -200,5 +200,9 @@ Wait until `jstat` reports `DISK` status, then submit.
 every invocation. With up to 50 concurrent tasks sharing the same checkout,
 this can race and cause `ClassNotFoundException` in a small fraction of tasks.
 Those tasks fail and are caught by `resubmit_failed.sh`. For a first production
-run this is acceptable. If failures are frequent, contact Maria to apply the
-rsync-per-submission workaround (design spec §7.5).
+run this is acceptable. If failures are frequent.
+
+
+## MLP models
+Alternate versions of the training scripts exist under MLPS to send the training for a small neural MLP model, uses same parameters as BDT in the command.
+

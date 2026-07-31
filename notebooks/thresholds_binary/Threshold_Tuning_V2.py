@@ -44,8 +44,8 @@ def apply_bdt_cut(df, threshold_df):
             continue
 
         bin_mask = (
-            (p >= row["pLow"]) & (p < row["pHigh"]) &
-            (theta >= row["thetaLow"]) & (theta < row["thetaHigh"])
+            (p >= row["p_low"]) & (p < row["p_high"]) &
+            (theta >= row["theta_low"]) & (theta < row["theta_high"])
         )
 
         pass_bdt |= bin_mask & (score > row["best_threshold"])
@@ -62,7 +62,7 @@ def main():
     # Load data + model
     # -----------------------------
     df_val = pd.read_parquet(
-        "/volatile/clas12/cooperb/SULI/dataset_v02/val.parquet"
+        "/volatile/clas12/cooperb/SULI/dataset_v03/val.parquet"
     )
 
     model_path = "/work/clas12/CooperBe/MLStuff/tier2All/model_v01/model.joblib"
@@ -77,7 +77,7 @@ def main():
     tBinNum = 5
 
     pStart = 0.5
-    pEnd = 3.2
+    pEnd = 5
     pBinNum = 10
 
     tBinEdges = np.linspace(tStart, tEnd, tBinNum + 1)
@@ -140,9 +140,9 @@ def main():
                     best_t = t
 
             results.append({
-                "thetaLow": tBinEdges[i],
-                "thetaHigh": tBinEdges[i + 1],
-                "pLow": pBinEdges[j],
+                "theta_low": tBinEdges[i],
+                "theta_high": tBinEdges[i + 1],
+                "p_low": pBinEdges[j],
                 "pHigh": pBinEdges[j + 1],
                 "best_threshold": best_t,
                 "best_fom": best_fom
@@ -153,7 +153,7 @@ def main():
     # -----------------------------
     results_df = pd.DataFrame(results)
     results_df.to_csv(
-        "../figures/optimized_thresholdsV2.csv",
+        "../figures/optimized_thresholdsV5.csv",
         index=False
     )
 
