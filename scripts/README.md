@@ -304,8 +304,3 @@ production.
 python scripts/plot_all_variables.py mc_training.root \
     --output-dir figures/variable_check/ --max-rows 500000
 ```
-
-
-## common_functions.py
-This program contains several utilities useful for analysis including commands to load bdt models, apply them, optimize FOM, and even automatically create binnings.
-Please see the comments inside for further information of what functions are avalible and what they return.

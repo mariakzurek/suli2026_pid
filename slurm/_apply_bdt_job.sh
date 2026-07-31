@@ -78,18 +78,34 @@ module use /cvmfs/oasis.opensciencegrid.org/jlab/hallb/clas12/sw/modulefiles 2>/
 #     which looks wrong but is correct for this install).
 # Never source ~/.bashrc — dotfiles are unavailable in batch shells.
 # ─────────────────────────────────────────────────────────────
-echo "Initializing conda..."
+CONDA_HOOK=""
+for candidate in \
+    "/work/clas12/${USER}/miniconda3/etc/profile.d/conda.sh" \
+    "${HOME}/miniconda3/etc/profile.d/conda.sh" \
+    "/usr/share/conda/etc/profile.d/conda.sh"
+do
+    if [ -f "${candidate}" ]; then
+        CONDA_HOOK="${candidate}"
+        break
+    fi
+done
 
-if ! command -v conda >/dev/null 2>&1; then
-    echo "ERROR: conda command not found"
+if [ -z "${CONDA_HOOK}" ]; then
+    echo "ERROR: conda hook not found.  Probed:" >&2
+    echo "  /work/clas12/${USER}/miniconda3/etc/profile.d/conda.sh" >&2
+    echo "  ${HOME}/miniconda3/etc/profile.d/conda.sh" >&2
+    echo "  /usr/share/conda/etc/profile.d/conda.sh" >&2
+    echo "" >&2
+    echo "  Install miniforge to one of the above paths, or add your conda" >&2
+    echo "  hook path to the probe loop in _apply_bdt_job.sh." >&2
     exit 1
 fi
 
-eval "$(/usr/bin/conda shell.bash hook)"
-
+echo "Sourcing conda hook: ${CONDA_HOOK}"
+# shellcheck source=/dev/null
+source "${CONDA_HOOK}"
 conda activate suli2026_pid
-
-echo "Conda activated: $CONDA_PREFIX"
+echo "Conda activated: ${CONDA_PREFIX}"
 echo "Python: $(which python)"
 
 # ─────────────────────────────────────────────────────────────

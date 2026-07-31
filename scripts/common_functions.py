@@ -385,10 +385,10 @@ def optimizeFOM(model_df, tBinEdges, pBinEdges, outputCSV=None, deviation=0):
                     best_t = np.nan
 
             results.append({
-                "theta_low": tBinEdges[i],
-                "theta_high": tBinEdges[i + 1],
-                "p_low": pBinEdges[j],
-                "p_high": pBinEdges[j + 1],
+                "thetaLow": tBinEdges[i],
+                "thetaHigh": tBinEdges[i + 1],
+                "pLow": pBinEdges[j],
+                "pHigh": pBinEdges[j + 1],
                 "best_threshold": best_t,
                 "best_fom": max_fom
             })
@@ -444,8 +444,8 @@ def apply_optimized_bdt_cut(df, threshold_df=None, CSVPath=None):
             continue
 
         bin_mask = (
-            (p >= row["p_low"]) & (p < row["p_high"]) &
-            (theta >= row["theta_low"]) & (theta < row["theta_high"])
+            (p >= row["pLow"]) & (p < row["pHigh"]) &
+            (theta >= row["thetaLow"]) & (theta < row["thetaHigh"])
         )
 
         pass_bdt |= bin_mask & (score > row["best_threshold"])
@@ -513,10 +513,8 @@ def computeEffChiPID(df, pBinEdges): #Standalone function for doing the efficien
 
     return np.array(eff, dtype=float)
 
-def MatchEfficiency(df, pBinEdges, csv_Path=None):
-    # This is a BDT cut that matches the efficiency of the chi2pid baseline method
+def MatchEfficiency(df, pBinEdges):    #This is a BDT cut that Matches th efficiency of the chi2pid baseline method
     import numpy as np
-    import pandas as pd
 
     # Remove unmatched particles
     df = df[df["mc_matching_pid"] != -9999].copy()
@@ -563,6 +561,7 @@ def MatchEfficiency(df, pBinEdges, csv_Path=None):
         best_diff = np.inf
 
         for t in thresholds:
+
             accepted = bin_scores > t
             eff = np.sum(accepted & true_k) / n_true_k
 
@@ -578,62 +577,6 @@ def MatchEfficiency(df, pBinEdges, csv_Path=None):
         if not np.isnan(best_t):
             pass_bdt[bin_mask] = scores[bin_mask] > best_t
 
-    thresholds_out = np.array(thresholds_out)
-
-    # Optionally save thresholds to CSV
-    if csv_Path is not None:
-        out_df = pd.DataFrame({
-            "p_low": pBinEdges[:-1],
-            "p_high": pBinEdges[1:],
-            "chi2pid_efficiency": effs,
-            "bdt_threshold": thresholds_out
-        })
-        out_df.to_csv(csv_Path, index=False)
-
-    return thresholds_out, pass_bdt
-
-def ApplyMatchedEfficiency(df, csv_Path):
-    """
-    Apply BDT thresholds stored in a CSV produced by MatchEfficiency.
-
-    Parameters
-    ----------
-    df : pandas.DataFrame
-        DataFrame containing at least the columns 'p' and 'score'.
-    csv_Path : str
-        Path to the CSV file produced by MatchEfficiency().
-
-    Returns
-    -------
-    pass_bdt : np.ndarray
-        Boolean array indicating whether each event passes the matched BDT cut.
-    """
-    import numpy as np
-    import pandas as pd
-
-    # Read threshold table
-    thresholds = pd.read_csv(csv_Path)
-
-    pass_bdt = np.zeros(len(df), dtype=bool)
-
-    p = df["p"].to_numpy()
-    scores = df["bdt_score"].to_numpy()
-
-    for _, row in thresholds.iterrows():
-
-        threshold = row["bdt_threshold"]
-
-        # Skip bins with no valid threshold
-        if np.isnan(threshold):
-            continue
-
-        p_lo = row["p_low"]
-        p_hi = row["p_high"]
-
-        mask = (p >= p_lo) & (p < p_hi)
-
-        pass_bdt[mask] = scores[mask] > threshold
-
-    return pass_bdt
+    return np.array(thresholds_out), pass_bdt
 
 
