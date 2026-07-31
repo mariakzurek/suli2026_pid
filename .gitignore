@@ -44,3 +44,6 @@ models/
 .idea/
 *.swp
 *~
+
+# JLab ifarm absolute-path leaks
+work/
