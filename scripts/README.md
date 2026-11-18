@@ -105,6 +105,9 @@ python scripts/compare_mc_data.py \
   - `n_hit_mc_cell`, `n_hit_data_cell` — rows in the cell with a valid (non-sentinel) value.
   - `hit_frac_mc_cell`, `hit_frac_data_cell` — per-cell hit fractions (n_hit / n_total for this kinematic cell); NaN if the cell is empty.
   - `hit_frac_delta` — `hit_frac_data_cell − hit_frac_mc_cell`; |Δ| > 0.05 flags a hit-fraction mismatch that should be reviewed before trusting the shape comparison for this cell.
+  - `neg_time_frac_removed_mc` — fraction of post-sentinel MC entries removed by the negative-time filter (`--exclude-negative-time`), i.e., `count(arr < 0) / len(arr)` on the post-sentinel array.  **NaN when the flag is off or the variable is not in `{ecin_time, ecout_time, pcal_time}`.**  Distinct from `hit_frac_*`: these sentinel-based metrics measure whether the detector fired at all; `neg_time_frac_removed_*` measures timing quality among tracks that did fire.
+  - `neg_time_frac_removed_data` — same metric for data.  NaN under the same conditions.
+  - `time_range_upper_mode` — string column, populated only for `ecin_time`, `ecout_time`, and `pcal_time` rows when `--exclude-negative-time` is active.  Values: `"max"` (raw maximum of the combined positive-time array was used as the histogram upper bound) or `"percentile_99_fallback"` (the max exceeded 3× the 99th percentile, indicating a pathological outlier; the 99th percentile was used instead).  NaN for all other variables or when the flag is off.
   - Legacy columns: `ks_distance`, `chi2_per_ndof`, `mean_rel_diff`, `max_abs_rel_diff`, `ks_flag`.
   - `status` — `ok` / `missing_column` / `empty`.
   - After running, the audit operator appends a `decision_notes` free-text column with any visual-cross-check observations or override rationale.
@@ -160,10 +163,13 @@ species.  The generic engine stays generic; this script encodes the
 project-specific workflow: species pid cut, MC truth-match mode, and the
 provenance README that makes each audit output directory self-documenting.
 
-The full per-column glossary for `feature_audit_summary.csv` lives at
-`figures/feature_audit/COLUMNS.md`. Start there if you're new to the audit
-output — it groups the ~25 CSV columns into "what to look at," "what explains
-the decision," and "sanity checks" tiers with plain-language definitions.
+The full per-column glossary for `feature_audit_summary.csv` is the canonical
+file `scripts/COLUMNS.md`.  `audit_species.py` automatically copies it into
+each run's output directory, so every audit result folder also contains a
+local `COLUMNS.md` for self-contained reference.  Start there if you're new to
+the audit output — it groups the ~30 CSV columns into "what to look at," "what
+explains the decision," and "sanity checks" tiers with plain-language
+definitions.
 
 ### Species aliases
 
@@ -223,6 +229,68 @@ When `--sidis-cuts` is active and `--outdir` was not explicitly provided, the ou
 #### When to use which
 
 The audit defaults to no event-level kinematic cuts because the trained classifier will see the uncut per-track sample at training time.  KEEP/CANDIDATE/DROP decisions should be based on the uncut comparison.  A second audit run with `--sidis-cuts` is a useful diagnostic: variables that disagree in the uncut comparison but agree in the SIDIS regime have their disagreement driven by exclusive contamination in data.  Variables that disagree in both have more fundamental MC mismodeling.  See `notes/cooper_10week_plan.md` Task 3a for the full workflow.
+
+### Negative-time exclusion for calorimeter timing variables
+
+The `--exclude-negative-time` flag activates an optional second filter step
+for `ecin_time`, `ecout_time`, and `pcal_time` only (all three ECAL/PCAL
+calorimeter timing columns).  After the standard `-9999` sentinel is removed,
+any remaining entries below 0 are additionally excluded.  These are
+genuinely-negative (non-physical) timing values that survive sentinel removal.
+FTOF scintillator timing (`ftof_time_1A/1B/2`) is not affected.
+
+**What it does:**
+- Filters `arr[arr >= 0]` from the post-sentinel array, separately for MC and data.
+- **Lower bound:** **1st percentile** (`np.percentile(combined, 1.0)`) of the combined
+  positive-time MC+data distribution, computed *after* both the −9999 sentinel and
+  any negative values (`arr < 0`) have been removed — i.e. the percentile never
+  includes non-positive values.  This is consistent with the 1st–99th-percentile
+  convention used for every other variable in the audit, and avoids a single sparse
+  low outlier near the origin anchoring the axis too close to 0 (the failure mode of
+  the former first-non-empty-bin approach).  If the computed lower bound equals or
+  exceeds the upper bound, it is reset to `0.0` as a degenerate-range guard.
+- **Upper bound:** **raw maximum** of the combined positive-time array (primary choice).
+  As a lightweight outlier guard: if `max > 3 × 99th-percentile(combined)`, the
+  99th percentile is used instead (`time_range_upper_mode = "percentile_99_fallback"`).
+  Which mode fired is recorded in the new CSV column `time_range_upper_mode`.
+- Adds `neg_time_frac_removed_mc` and `neg_time_frac_removed_data` to the CSV
+  (fraction of post-sentinel valid-hit entries removed; typically 1–3%).
+- Has **no effect** on any other variable.
+
+**New CSV column `time_range_upper_mode`:** populated only for `ecin_time`,
+`ecout_time`, and `pcal_time` rows when the flag is on.  Values: `"max"` or
+`"percentile_99_fallback"`.  NaN for all other variables or when the flag is off.
+
+**Flag:** `--exclude-negative-time` (store_true, default off).
+
+**Off by default:** omitting the flag reproduces the original full-range
+analysis exactly.  The timing-specific CSV columns are `NaN` for all runs where
+the flag is off, or for any non-timing variable even when the flag is on.
+
+**Key distinction from `hit_frac_*`:** sentinel-based hit fractions measure
+whether the detector fired at all (~45–55% no-hit rate for ECAL/PCAL timing).
+Negative-time removal fractions measure timing quality **among tracks that did
+fire** (1–3% removal).  The two diagnostics are entirely separate and must not
+be conflated.
+
+### Energy variable double-binning
+
+For the six ECAL/PCAL/FTOF energy variables (`ecin_energy`, `ecout_energy`,
+`pcal_energy`, `ftof_energy_1A`, `ftof_energy_1B`, `ftof_energy_2`),
+`run_feature_audit` unconditionally uses **double the requested bin count**
+(i.e. `bins_used = bins × 2`, so the default `--bins 50` → 100 bins for
+these variables).
+
+Motivation: energy deposits in these calorimeter and scintillator channels are
+concentrated in a narrow low-energy region where MC/data shape differences are
+hard to resolve with 50 coarse bins.  Doubling the resolution reveals structure
+in the low-energy peak without changing any other aspect of the analysis —
+sentinel stripping, the 1st–99th-percentile range convention, normalisation,
+and drift metrics are all identical.
+
+This behaviour is **not gated by a flag** because it is a pure visual
+resolution refinement that does not affect cuts, selections, or the underlying
+data, and should always be active for these variables.
 
 ### Column pruning
 

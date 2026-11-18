@@ -132,6 +132,67 @@ KINEMATIC_FEATURES = ["p", "theta", "phi", "vz", "sector"]
 P_BINS_AUDIT     = [(1.0, 2.0), (2.0, 3.0), (3.0, 5.0)]   # GeV/c
 THETA_BINS_AUDIT = [(5.0, 15.0), (15.0, 25.0), (25.0, 35.0)]  # degrees
 
+# ── Timing-variable configuration ─────────────────────────────────────────────
+# Calorimeter timing variables for which genuinely-negative (non-sentinel)
+# timing values are physically non-meaningful and can be optionally excluded.
+# This list is only consulted when the caller explicitly enables
+# exclude_negative_time=True.  Scope is intentionally limited to the three
+# ECAL/PCAL calorimeter timing columns:
+#   ecin_time  — ECAL inner layer timing
+#   ecout_time — ECAL outer layer timing (added 2026-11; previously missing,
+#                causing plots starting around -200 ns from the raw-signed-range
+#                percentile logic)
+#   pcal_time  — Pre-shower calorimeter timing
+#
+# FTOF scintillator timing (ftof_time_1A, ftof_time_1B, ftof_time_2) is NOT
+# included; the signed-time behaviour there is different and out of scope.
+#
+# Range rules when exclude_negative_time=True for these variables:
+#   LOWER BOUND — 1st percentile of the combined positive-time MC+data
+#                 distribution (after sentinel-stripping and negative-value
+#                 removal).  This is consistent with the 1st–99th-percentile
+#                 convention used for every other variable in the audit, and
+#                 avoids the previous first-non-empty-bin approach being dragged
+#                 arbitrarily close to zero by a single sparse outlier near the
+#                 origin.  The ~1 % tail clip is a worthwhile trade for much
+#                 better resolution over the populated region.
+#
+#   WHEN — only when exclude_negative_time=True and variable ∈ TIME_VARIABLES.
+#
+#   PITFALLS — if the 1st percentile equals or exceeds the upper bound (plo >=
+#              phi), the lower bound is reset to 0.0 as a degenerate-range guard.
+#
+#   UPPER BOUND — raw max of combined positive-time array (primary choice), with
+#                 a fallback to the 99th percentile if max > 3 × p99 (outlier
+#                 guard).  Which mode was used is recorded in the stats dict as
+#                 time_range_upper_mode ("max" or "percentile_99_fallback"); NaN
+#                 for all other variables or when the flag is off.
+TIME_VARIABLES = ["ecin_time", "ecout_time", "pcal_time"]
+
+# Safety-guard threshold for the upper-bound selection rule above.
+# If the raw maximum of the combined positive-time array exceeds this multiple
+# of the 99th percentile, the max is treated as a pathological outlier and the
+# 99th percentile is used instead (time_range_upper_mode = "percentile_99_fallback").
+# Chosen at 3× because real timing distributions have moderate right skew but
+# rarely exceed ~3–5× their 99th-percentile value; a factor > 3 strongly suggests
+# a residual non-physical outlier (e.g. a stray uncorrected hit).
+TIME_MAX_OUTLIER_FACTOR = 3.0
+
+# ── Energy-variable configuration ──────────────────────────────────────────────
+# For these variables the requested bin count is unconditionally doubled
+# (bins_used = bins * 2, where bins is whatever was passed to run_feature_audit
+# or compare_distribution, default 50 → 100).  Motivation: energy deposits in
+# ECAL and PCAL are concentrated in a narrow low-energy region where differences
+# between MC and data are hard to resolve with the standard 50-bin coarseness.
+# No other behaviour is changed: sentinel stripping, the 1st–99th-percentile
+# range convention, normalisation, and drift metrics are all identical.
+# This is not gated by a flag because it is purely a resolution refinement and
+# does not affect cuts, selections, or the underlying data.
+ENERGY_VARIABLES = [
+    "ecin_energy", "ecout_energy", "pcal_energy",
+    "ftof_energy_1A", "ftof_energy_1B", "ftof_energy_2",
+]
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Statistical functions
@@ -930,6 +991,7 @@ def compare_distribution(
     title=None,
     save_path=None,
     figsize=(10, 6),
+    exclude_negative_time=False,
 ):
     """
     Make a 2-panel diagnostic plot comparing MC and data for one variable,
@@ -1000,6 +1062,50 @@ def compare_distribution(
         created automatically).
     figsize : (float, float)
         Matplotlib figure size.  Default (10, 6).
+    exclude_negative_time : bool
+        WHAT IT DOES
+        When True and ``variable`` is in ``TIME_VARIABLES``
+        (``ecin_time``, ``ecout_time``, ``pcal_time``), an additional filter
+        is applied *after* sentinel removal: any remaining entries with
+        value < 0 are excluded.  These are genuinely-negative timing values
+        that are physically non-meaningful (distinct from the −9999 no-hit
+        sentinel).  For all other variables or when False, this parameter has
+        no effect — behaviour is identical to omitting it.
+
+        WHEN TO USE IT
+        Pass True to produce timing plots anchored near 0 with an axis range
+        driven by the actual data extent.  Leave False (default) for the
+        original full-range analysis or for any non-timing variable.
+
+        RANGE RULES (when active for a TIME_VARIABLES member)
+        Lower bound — 1st percentile (``np.percentile(combined, 1.0)``) of
+            the combined (MC+data) positive-time distribution, computed AFTER
+            both the −9999 sentinel and any negative values (``arr < 0``) have
+            been removed — i.e. the percentile is never computed over non-
+            positive values.  This is consistent with the 1st–99th-percentile
+            convention used for every other variable in the audit, and avoids
+            a single sparse low outlier near the origin dragging the axis
+            boundary arbitrarily close to 0 (the failure mode of the old
+            first-non-empty-bin approach).  If the resulting lower bound
+            equals or exceeds the upper bound, it is reset to 0.0 as a
+            degenerate-range guard.
+        Upper bound — raw maximum of the combined positive-time array (primary
+            choice).  If max > TIME_MAX_OUTLIER_FACTOR × 99th-percentile (i.e.
+            the max is wildly disproportionate to the bulk distribution), the
+            99th percentile is used as a fallback instead.  The mode chosen is
+            recorded in ``time_range_upper_mode`` in the returned stats dict:
+            "max" for the primary path, "percentile_99_fallback" for the
+            outlier-guard path.  This field is NaN for all other variables.
+
+        PITFALLS
+        The existing ``hit_frac_*`` / ``n_hit_*`` sentinel-based metrics are
+        computed **before** this additional filter and **are not affected by
+        it**.  ``neg_time_frac_removed_mc`` and ``neg_time_frac_removed_data``
+        are entirely separate diagnostics: they quantify what fraction of
+        post-sentinel ("has a hit") entries are removed by the extra negative-
+        time step.  Do not confuse a 1–3% removal fraction here with the
+        ~45–55% sentinel hit fractions.
+        Default False preserves backward compatibility exactly.
 
     Returns
     -------
@@ -1007,11 +1113,15 @@ def compare_distribution(
         Keys:
           'variable'          : str   — the variable name
           'n_mc'              : int   — number of MC events after selection + sentinel strip
+                                        (and after negative-time filter when enabled)
           'n_data'            : int   — number of data events after selection + sentinel strip
+                                        (and after negative-time filter when enabled)
           'hit_frac_mc'       : float — fraction of MC rows with a non-sentinel value
                                         computed on the *parent* DataFrame before any (p,θ)
                                         selection; reflects global detector acceptance.
+                                        Always computed before any negative-time filter.
           'hit_frac_data'     : float — same for data, on the full parent DataFrame.
+                                        Always computed before any negative-time filter.
           'n_total_mc_cell'   : int   — total MC rows in this (p,θ) cell (after selection,
                                         before sentinel strip).
           'n_total_data_cell' : int   — total data rows in this (p,θ) cell.
@@ -1026,6 +1136,27 @@ def compare_distribution(
                                         fraction is NaN.  |Δ| > 0.05 flags a hit-fraction
                                         mismatch that should be reviewed before trusting the
                                         shape comparison for this cell.
+                                        Always computed before any negative-time filter.
+          'neg_time_frac_removed_mc'  : float — fraction of post-sentinel MC entries removed
+                                        by the negative-time filter (count(arr < 0) / len(arr)
+                                        where arr is the post-sentinel array).  NaN when
+                                        exclude_negative_time is False or the variable is not
+                                        in TIME_VARIABLES.  Distinct from hit_frac_* (which
+                                        measure sentinel/no-hit absence, not negative timing).
+          'neg_time_frac_removed_data': float — same metric for data.  NaN under the same
+                                        conditions as neg_time_frac_removed_mc.
+          'time_range_upper_mode'     : str — which upper-bound rule was used for the
+                                        histogram range when exclude_negative_time=True and
+                                        the variable is in TIME_VARIABLES.  Values:
+                                          "max"                   — raw max of combined
+                                                                    positive-time array was
+                                                                    used (the primary path).
+                                          "percentile_99_fallback"— max was > 3 × 99th-
+                                                                    percentile (outlier guard
+                                                                    triggered); 99th percentile
+                                                                    was used instead.
+                                        NaN (empty string in CSV) for all other variables or
+                                        when exclude_negative_time=False.
           'ks_distance'       : float — KS statistic D
           'ks_pvalue'         : float — KS p-value
           'chi2'              : float — chi-squared statistic
@@ -1065,6 +1196,18 @@ def compare_distribution(
         populations that produced hits are systematically different).  Flag any
         cell where |hit_frac_delta| > 0.05 for review before trusting its drift
         decision.
+
+        **Negative-time removal fractions.**  When ``exclude_negative_time=True``
+        and the variable is in TIME_VARIABLES, ``neg_time_frac_removed_mc`` and
+        ``neg_time_frac_removed_data`` record what fraction of post-sentinel
+        (i.e., valid-hit) entries had a genuinely-negative timing value and were
+        excluded.  These are entirely separate from the sentinel-based hit
+        fractions above: a 1–3% removal here means 1–3% of tracks that *did*
+        produce a timing hit had a non-physical negative value, whereas
+        hit_frac_* ~45–55% means ~45–55% of all tracks had no hit at all.
+        When the flag is off or the variable is not a time variable, both
+        fields are NaN (not 0.0 — NaN means "filter was not applicable",
+        a real 0.0 would mean the filter ran and found nothing to remove).
     """
     # ── 1. Apply selections ───────────────────────────────────────────────────
     df_mc_sel   = df_mc   if selection_mc   is None else df_mc[selection_mc]
@@ -1132,18 +1275,95 @@ def compare_distribution(
     arr_mc   = _strip_sentinels(raw_mc,   variable)
     arr_data = _strip_sentinels(raw_data, variable)
 
+    # ── 3b. Optional negative-time filter (ecin_time / ecout_time / pcal_time) ──
+    # This step is distinct from sentinel removal above.  Sentinel removal
+    # handles -9999 (no-hit / not-reconstructed); this step removes genuinely-
+    # measured but physically non-meaningful negative timing values that survive
+    # sentinel removal.  The two diagnostics (hit_frac_* and
+    # neg_time_frac_removed_*) must remain separate: hit_frac_* reflects
+    # detector-hit availability; neg_time_frac_removed_* reflects timing quality
+    # among tracks that *did* produce a hit.
+    #
+    # NOTE: hit_frac_*, n_hit_*_cell, and hit_frac_delta (computed above)
+    # are all sentinel-only metrics and are unaffected by this block.
+    if exclude_negative_time and variable in TIME_VARIABLES:
+        # Compute removal fractions BEFORE actually filtering, using the
+        # post-sentinel arrays as denominators.  An empty post-sentinel array
+        # yields NaN (not 0.0: NaN means "no entries to filter", which is
+        # distinct from "filter ran and removed nothing").
+        n_post_sentinel_mc   = len(arr_mc)
+        n_post_sentinel_data = len(arr_data)
+        n_neg_mc   = int(np.sum(arr_mc   < 0)) if n_post_sentinel_mc   > 0 else 0
+        n_neg_data = int(np.sum(arr_data < 0)) if n_post_sentinel_data > 0 else 0
+        neg_time_frac_removed_mc   = (n_neg_mc   / n_post_sentinel_mc
+                                      if n_post_sentinel_mc   > 0 else np.nan)
+        neg_time_frac_removed_data = (n_neg_data / n_post_sentinel_data
+                                      if n_post_sentinel_data > 0 else np.nan)
+        # Apply the filter
+        arr_mc   = arr_mc[arr_mc   >= 0]
+        arr_data = arr_data[arr_data >= 0]
+    else:
+        # Flag not active or not a time variable — NaN means "not applicable".
+        neg_time_frac_removed_mc   = np.nan
+        neg_time_frac_removed_data = np.nan
+
     # ── 4. Determine histogram range ──────────────────────────────────────────
+    # time_range_upper_mode is populated only for TIME_VARIABLES with the flag
+    # on; it records whether the raw max or the 99th-percentile fallback was
+    # used as the upper bound.  NaN for all other variables.
+    time_range_upper_mode = np.nan   # will be set to a string if applicable
+
     if range is None:
         combined = np.concatenate([arr_mc, arr_data])
         if len(combined) == 0:
             warnings.warn(f"compare_distribution: no valid data for '{variable}' "
                           "after sentinel removal.  Returning empty stats.",
                           RuntimeWarning, stacklevel=2)
-            return _empty_stats(variable, 0, 0)  # status="empty" set inside _empty_stats
-        plo = float(np.percentile(combined, 1))
-        phi = float(np.percentile(combined, 99))
-        if plo == phi:
-            plo, phi = plo - 1.0, phi + 1.0
+            # Edge case: if negative-time filter emptied the arrays, we still
+            # have valid neg_time_frac_removed_* values.  Populate them in the
+            # empty stats before returning, so CSV schema is consistent.
+            result = _empty_stats(variable, 0, 0)
+            result["neg_time_frac_removed_mc"]   = neg_time_frac_removed_mc
+            result["neg_time_frac_removed_data"] = neg_time_frac_removed_data
+            return result
+        if exclude_negative_time and variable in TIME_VARIABLES:
+            # ── Calorimeter-timing range rules ───────────────────────────────
+            # All remaining values are >= 0 (the negative-time filter above);
+            # `combined` contains only valid positive times at this point.
+            #
+            # LOWER BOUND: 1st percentile of the combined positive-time array.
+            # Consistent with the 1st–99th-percentile convention used for every
+            # other variable in the audit.  Trades a ~1 % tail clip for much
+            # better resolution over the populated region; the previous
+            # first-non-empty-bin approach could be dragged arbitrarily low by
+            # a single sparse outlier near zero.
+            #
+            # UPPER BOUND: raw max of the combined positive-time array (primary
+            # choice).  If max > TIME_MAX_OUTLIER_FACTOR × 99th-percentile, a
+            # single outlier is likely blowing out the range; fall back to the
+            # 99th percentile.  Which mode fired is recorded in
+            # time_range_upper_mode so the CSV is auditable.
+            combined_max = float(combined.max())
+            p99          = float(np.percentile(combined, 99.0))
+            if combined_max > TIME_MAX_OUTLIER_FACTOR * p99:
+                phi                   = p99
+                time_range_upper_mode = "percentile_99_fallback"
+            else:
+                phi                   = combined_max
+                time_range_upper_mode = "max"
+            if phi <= 0.0:
+                phi = 1.0   # degenerate-range guard (no positive values)
+
+            # 1st-percentile lower bound.
+            plo = float(np.percentile(combined, 1.0))
+
+            if plo >= phi:
+                plo = 0.0   # degenerate-range guard
+        else:
+            plo = float(np.percentile(combined, 1))
+            phi = float(np.percentile(combined, 99))
+            if plo == phi:
+                plo, phi = plo - 1.0, phi + 1.0
         hist_range = (plo, phi)
     else:
         hist_range = tuple(range)
@@ -1210,33 +1430,36 @@ def compare_distribution(
     drift_dec      = classify_drift(psi_val, w_norm, max_resid_val)
 
     stats = {
-        "variable"           : variable,
-        "n_mc"               : len(arr_mc),
-        "n_data"             : len(arr_data),
-        "hit_frac_mc"        : hit_frac_mc,
-        "hit_frac_data"      : hit_frac_data,
-        "n_total_mc_cell"    : n_total_mc_cell,
-        "n_total_data_cell"  : n_total_data_cell,
-        "n_hit_mc_cell"      : n_hit_mc_cell,
-        "n_hit_data_cell"    : n_hit_data_cell,
-        "hit_frac_mc_cell"   : hit_frac_mc_cell,
-        "hit_frac_data_cell" : hit_frac_data_cell,
-        "hit_frac_delta"     : hit_frac_delta,
-        "ks_distance"        : ks_dist,
-        "ks_pvalue"          : ks_pval,
-        "chi2"               : chi2_val,
-        "ndof"               : ndof,
-        "chi2_per_ndof"      : chi2_per_ndof,
-        "chi2_pvalue"        : chi2_pval,
-        "mean_rel_diff"      : mean_rel_diff,
-        "max_abs_rel_diff"   : max_abs_rel_diff,
-        "ks_flag"            : (ks_dist > KS_FLAG_THRESHOLD) if np.isfinite(ks_dist) else False,
-        "wasserstein"        : w_raw,
-        "wasserstein_norm"   : w_norm,
-        "psi"                : psi_val,
-        "max_local_residual" : max_resid_val,
-        "drift_decision"     : drift_dec,
-        "status"             : "ok",
+        "variable"                  : variable,
+        "n_mc"                      : len(arr_mc),
+        "n_data"                    : len(arr_data),
+        "hit_frac_mc"               : hit_frac_mc,
+        "hit_frac_data"             : hit_frac_data,
+        "n_total_mc_cell"           : n_total_mc_cell,
+        "n_total_data_cell"         : n_total_data_cell,
+        "n_hit_mc_cell"             : n_hit_mc_cell,
+        "n_hit_data_cell"           : n_hit_data_cell,
+        "hit_frac_mc_cell"          : hit_frac_mc_cell,
+        "hit_frac_data_cell"        : hit_frac_data_cell,
+        "hit_frac_delta"            : hit_frac_delta,
+        "neg_time_frac_removed_mc"  : neg_time_frac_removed_mc,
+        "neg_time_frac_removed_data": neg_time_frac_removed_data,
+        "time_range_upper_mode"     : time_range_upper_mode,
+        "ks_distance"               : ks_dist,
+        "ks_pvalue"                 : ks_pval,
+        "chi2"                      : chi2_val,
+        "ndof"                      : ndof,
+        "chi2_per_ndof"             : chi2_per_ndof,
+        "chi2_pvalue"               : chi2_pval,
+        "mean_rel_diff"             : mean_rel_diff,
+        "max_abs_rel_diff"          : max_abs_rel_diff,
+        "ks_flag"                   : (ks_dist > KS_FLAG_THRESHOLD) if np.isfinite(ks_dist) else False,
+        "wasserstein"               : w_raw,
+        "wasserstein_norm"          : w_norm,
+        "psi"                       : psi_val,
+        "max_local_residual"        : max_resid_val,
+        "drift_decision"            : drift_dec,
+        "status"                    : "ok",
     }
 
     # ── 7. Build figure ───────────────────────────────────────────────────────
@@ -1305,7 +1528,22 @@ def compare_distribution(
         hit_flag   = ""
     hit_str = f"hit MC/Data = {hmc_ann}/{hdat_ann} (Δ = {hdelta_ann}){hit_flag}"
 
-    annotation = f"{ks_str}\n{chi2_str}\n{drift_str}\n{hit_str}"
+    # Negative-time removal annotation: only shown for enabled timing filter.
+    # Kept separate from hit_str so the two distinct diagnostics are visually
+    # distinct on the plot (hit_str = sentinel/no-hit; negtime_str = timing quality).
+    if exclude_negative_time and variable in TIME_VARIABLES:
+        def _fmt_frac(v):
+            return f"{v:.4f}" if np.isfinite(v) else "N/A"
+        negtime_str = (f"neg-t removed MC/Data = "
+                       f"{_fmt_frac(neg_time_frac_removed_mc)}/"
+                       f"{_fmt_frac(neg_time_frac_removed_data)}")
+        # Show which upper-bound mode was used (max vs percentile_99_fallback).
+        mode_str = ""
+        if isinstance(time_range_upper_mode, str):
+            mode_str = f"\nrange upper: {time_range_upper_mode}"
+        annotation = f"{ks_str}\n{chi2_str}\n{drift_str}\n{hit_str}\n{negtime_str}{mode_str}"
+    else:
+        annotation = f"{ks_str}\n{chi2_str}\n{drift_str}\n{hit_str}"
     ax_top.text(
         0.98, 0.97, annotation,
         transform=ax_top.transAxes, ha="right", va="top",
@@ -1356,35 +1594,45 @@ def _empty_stats(variable, n_mc, n_data):
     was present in both DataFrames but had no valid entries after sentinel
     removal.  Callers that detect a missing column should overwrite
     ``status`` with ``'missing_column'`` before returning.
+
+    The two negative-time fields are NaN here because they are only
+    populated when the filter is both enabled and the variable is in
+    TIME_VARIABLES and there are valid post-sentinel entries to inspect.
+    If the negative-time filter itself emptied the arrays, the caller
+    overwrites these fields with the actual computed fractions before
+    returning (see compare_distribution step 3b / edge-case handling).
     """
     return {
-        "variable"           : variable,
-        "n_mc"               : n_mc,
-        "n_data"             : n_data,
-        "hit_frac_mc"        : np.nan,
-        "hit_frac_data"      : np.nan,
-        "n_total_mc_cell"    : 0,
-        "n_total_data_cell"  : 0,
-        "n_hit_mc_cell"      : 0,
-        "n_hit_data_cell"    : 0,
-        "hit_frac_mc_cell"   : np.nan,
-        "hit_frac_data_cell" : np.nan,
-        "hit_frac_delta"     : np.nan,
-        "ks_distance"        : np.nan,
-        "ks_pvalue"          : np.nan,
-        "chi2"               : np.nan,
-        "ndof"               : 0,
-        "chi2_per_ndof"      : np.nan,
-        "chi2_pvalue"        : np.nan,
-        "mean_rel_diff"      : np.nan,
-        "max_abs_rel_diff"   : np.nan,
-        "ks_flag"            : False,
-        "wasserstein"        : np.nan,
-        "wasserstein_norm"   : np.nan,
-        "psi"                : np.nan,
-        "max_local_residual" : np.nan,
-        "drift_decision"     : "UNKNOWN",
-        "status"             : "empty",
+        "variable"                  : variable,
+        "n_mc"                      : n_mc,
+        "n_data"                    : n_data,
+        "hit_frac_mc"               : np.nan,
+        "hit_frac_data"             : np.nan,
+        "n_total_mc_cell"           : 0,
+        "n_total_data_cell"         : 0,
+        "n_hit_mc_cell"             : 0,
+        "n_hit_data_cell"           : 0,
+        "hit_frac_mc_cell"          : np.nan,
+        "hit_frac_data_cell"        : np.nan,
+        "hit_frac_delta"            : np.nan,
+        "neg_time_frac_removed_mc"  : np.nan,
+        "neg_time_frac_removed_data": np.nan,
+        "time_range_upper_mode"     : np.nan,
+        "ks_distance"               : np.nan,
+        "ks_pvalue"                 : np.nan,
+        "chi2"                      : np.nan,
+        "ndof"                      : 0,
+        "chi2_per_ndof"             : np.nan,
+        "chi2_pvalue"               : np.nan,
+        "mean_rel_diff"             : np.nan,
+        "max_abs_rel_diff"          : np.nan,
+        "ks_flag"                   : False,
+        "wasserstein"               : np.nan,
+        "wasserstein_norm"          : np.nan,
+        "psi"                       : np.nan,
+        "max_local_residual"        : np.nan,
+        "drift_decision"            : "UNKNOWN",
+        "status"                    : "empty",
     }
 
 
@@ -1403,6 +1651,7 @@ def run_feature_audit(
     normalize=True,
     label_mc="MC",
     label_data="Data",
+    exclude_negative_time=False,
 ):
     """
     Run compare_distribution() over a list of variables and (p, θ) slices,
@@ -1434,14 +1683,34 @@ def run_feature_audit(
         Normalise histograms to unit area.  Default True.
     label_mc : str
     label_data : str
+    exclude_negative_time : bool
+        When True, passed through to compare_distribution() so that
+        ``ecin_time``, ``ecout_time``, and ``pcal_time`` are filtered to
+        remove genuinely-negative timing values after sentinel removal, and
+        their histogram range is determined by the 1st-percentile lower bound
+        (``np.percentile`` of the combined positive-time array, after sentinel
+        and negative-value removal) and the max-with-outlier-fallback upper
+        bound.
+        Has no effect on any other variable.  Default False (backward
+        compatible — omitting the parameter reproduces the original
+        full-range analysis exactly).
 
     Returns
     -------
     pd.DataFrame
         Summary table with columns: variable, p_lo, p_hi, theta_lo, theta_hi,
-        n_mc, n_data, hit_frac_mc, hit_frac_data, ks_distance, ks_pvalue,
-        chi2, ndof, chi2_per_ndof, chi2_pvalue, mean_rel_diff,
-        max_abs_rel_diff, ks_flag.
+        n_mc, n_data, hit_frac_mc, hit_frac_data, neg_time_frac_removed_mc,
+        neg_time_frac_removed_data, time_range_upper_mode, ks_distance,
+        ks_pvalue, chi2, ndof, chi2_per_ndof, chi2_pvalue, mean_rel_diff,
+        max_abs_rel_diff, ks_flag, wasserstein, wasserstein_norm, psi,
+        max_local_residual, drift_decision, status.
+        ``time_range_upper_mode`` is a string ("max" or "percentile_99_fallback")
+        only for TIME_VARIABLES rows with exclude_negative_time=True; NaN
+        elsewhere.
+        Timing-filter removal fraction columns are NaN for non-time variables
+        or when exclude_negative_time=False.
+        ENERGY_VARIABLES use double the requested ``bins`` count
+        (bins_used = bins * 2) for finer resolution in the low-energy region.
     """
     if p_bins is None:
         p_bins = P_BINS_AUDIT
@@ -1482,13 +1751,21 @@ def run_feature_audit(
                 title = (f"{var}   {label_mc} vs {label_data}\n"
                          f"p ∈ [{p_lo}, {p_hi}] GeV/c,  θ ∈ [{t_lo}°, {t_hi}°]")
 
+                # Energy variables use double the requested bin count for
+                # finer resolution in the low-energy region where MC/data
+                # differences are hard to see with standard 50-bin coarseness.
+                # This is unconditional (not flag-gated): it is a pure visual
+                # resolution refinement and does not affect cuts or metrics.
+                bins_used = bins * 2 if var in ENERGY_VARIABLES else bins
+
                 st = compare_distribution(
                     df_mc, df_data, variable=var,
-                    bins=bins, normalize=normalize,
+                    bins=bins_used, normalize=normalize,
                     selection_mc=sel_mc, selection_data=sel_data,
                     label_mc=label_mc, label_data=label_data,
                     title=title,
                     save_path=save_path,
+                    exclude_negative_time=exclude_negative_time,
                 )
 
                 if st.get("status") == "missing_column":
@@ -2068,6 +2345,9 @@ if __name__ == "__main__":
         "n_total_mc_cell", "n_total_data_cell",
         "n_hit_mc_cell", "n_hit_data_cell",
         "hit_frac_mc_cell", "hit_frac_data_cell", "hit_frac_delta",
+        # Timing-filter diagnostic columns (NaN for non-time variables)
+        "neg_time_frac_removed_mc", "neg_time_frac_removed_data",
+        "time_range_upper_mode",
         "ks_distance", "ks_pvalue", "chi2", "ndof", "chi2_per_ndof",
         "chi2_pvalue", "mean_rel_diff", "max_abs_rel_diff", "ks_flag",
         # Generic drift-metric keys

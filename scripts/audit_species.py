@@ -318,8 +318,34 @@ def _apply_mx_cut(df_mc, df_data, mx_min, mx_max, species_alias):
 
 def _write_audit_readme(outdir, pid, label, truth_mode, mc_path, data_path, variables,
                         vz_cut_line="Vertex-z cut: disabled",
-                        extra_cut_lines=None):
-    """Write a provenance README (≤30 lines) into outdir."""
+                        extra_cut_lines=None,
+                        n_mc_loaded=None, n_data_loaded=None,
+                        n_mc_selected=None, n_data_selected=None,
+                        exclude_negative_time=False,
+                        p_bins=None, theta_bins=None, bins=50,
+                        normalize=True):
+    """Write a provenance README into outdir documenting the full run configuration.
+
+    WHAT IT DOES
+    ------------
+    Writes a self-contained Markdown README into the audit output directory,
+    capturing everything needed to reproduce or interpret the run: input file
+    paths, entry counts (loaded and post-selection), species/selection
+    expressions, truth mode, cuts applied, audit grid, bin count, normalization
+    convention, and whether the negative-time exclusion filter was active.
+
+    WHEN TO USE IT
+    --------------
+    Called once after the audit completes.  The file is a provenance record
+    so the output directory is self-documenting weeks later.
+
+    PITFALLS
+    --------
+    n_mc_loaded / n_data_loaded are the raw file entry counts (before species
+    cuts); n_mc_selected / n_data_selected are the counts actually used in the
+    audit (after all cuts).  Both should be passed for a complete record.
+    If counts are None they are omitted from the README rather than faked.
+    """
     now    = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     mc_sel = {
         "matched": f"(pid == {pid}) & (mc_matching_pid != {SENTINEL_LOW})",
@@ -329,22 +355,73 @@ def _write_audit_readme(outdir, pid, label, truth_mode, mc_path, data_path, vari
     extra_block = ""
     if extra_cut_lines:
         extra_block = "".join(f"  {line}\n" for line in extra_cut_lines)
+
+    # Entry-count block: only emit if counts were provided
+    count_block = ""
+    if n_mc_loaded is not None and n_data_loaded is not None:
+        count_block += f"\n## Entry counts\n"
+        count_block += f"  MC   loaded   : {n_mc_loaded:,}\n"
+        count_block += f"  Data loaded   : {n_data_loaded:,}\n"
+    if n_mc_selected is not None and n_data_selected is not None:
+        count_block += f"  MC   selected : {n_mc_selected:,}  (after all cuts)\n"
+        count_block += f"  Data selected : {n_data_selected:,}  (after all cuts)\n"
+
+    # Audit grid block
+    _p_bins     = p_bins     if p_bins     is not None else [(1.0, 2.0), (2.0, 3.0), (3.0, 5.0)]
+    _theta_bins = theta_bins if theta_bins is not None else [(5.0, 15.0), (15.0, 25.0), (25.0, 35.0)]
+    p_str     = ", ".join(f"[{lo},{hi}]" for lo, hi in _p_bins)
+    theta_str = ", ".join(f"[{lo},{hi}]" for lo, hi in _theta_bins)
+    norm_str  = "unit-area (count / (total × bin_width))" if normalize else "raw counts (no normalisation)"
+
+    # Negative-time filter block
+    if exclude_negative_time:
+        negtime_block = (
+            f"\n## Negative-time exclusion (ecin_time, ecout_time, pcal_time)\n"
+            f"  --exclude-negative-time: ENABLED\n"
+            f"  After sentinel removal (-9999), entries below 0 are removed for\n"
+            f"  ecin_time, ecout_time, and pcal_time only.  These are non-physical\n"
+            f"  timing values distinct from the -9999 no-hit sentinel.\n"
+            f"  Histogram lower bound: 1st percentile (np.percentile(combined, 1.0))\n"
+            f"  of the combined positive-time MC+data distribution, computed after\n"
+            f"  sentinel and negative-value removal (never includes non-positive values).\n"
+            f"  Histogram upper bound: raw max of combined positive-time array;\n"
+            f"  fallback to 99th percentile if max > 3×p99 (outlier guard).\n"
+            f"  time_range_upper_mode in CSV: 'max' or 'percentile_99_fallback'.\n"
+            f"  neg_time_frac_removed_mc/data in CSV: fraction of post-sentinel\n"
+            f"  valid-hit entries removed by this step (distinct from hit_frac_*).\n"
+            f"  NaN for all non-timing variables.\n"
+        )
+    else:
+        negtime_block = (
+            f"\n## Negative-time exclusion\n"
+            f"  --exclude-negative-time: DISABLED (default)\n"
+            f"  Timing variables use the standard 1st-99th-percentile range.\n"
+            f"  neg_time_frac_removed_mc/data in CSV: NaN (filter not applied).\n"
+            f"  time_range_upper_mode in CSV: NaN (filter not applied).\n"
+        )
+
     content = (
         f"# Feature audit — species {label} (pid={pid})\n\n"
         f"Generated: {now}\n\n"
-        f"## Selections applied\n"
+        f"## Input files\n"
+        f"  MC   : {mc_path}\n"
+        f"  Data : {data_path}\n"
+        f"{count_block}"
+        f"\n## Selections applied\n"
         f"  MC   : {mc_sel}\n"
         f"  Data : pid == {pid}\n"
         f"  Truth mode: {truth_mode}\n"
         f"  {vz_cut_line}\n"
         f"{extra_block}"
-        f"\n## Input files\n"
-        f"  MC   : {mc_path}\n"
-        f"  Data : {data_path}\n\n"
-        f"## Variables audited\n"
-        f"  {', '.join(variables)}\n\n"
-        f"## Column meanings\n"
-        f"  See figures/feature_audit/COLUMNS.md for the per-column glossary.\n"
+        f"\n## Audit configuration\n"
+        f"  Variables audited : {', '.join(variables)}\n"
+        f"  p bins (GeV/c)    : {p_str}\n"
+        f"  theta bins (deg)  : {theta_str}\n"
+        f"  Histogram bins    : {bins}\n"
+        f"  Normalization     : {norm_str}\n"
+        f"{negtime_block}"
+        f"\n## Column meanings\n"
+        f"  See COLUMNS.md in this directory for the per-column glossary.\n"
         f"  See scripts/README.md (compare_mc_data.py Output section) for full metric definitions.\n"
         f"  See notes/cooper_10week_plan.md Task 3a for the full audit workflow.\n"
     )
@@ -459,6 +536,23 @@ def _build_parser():
                          "is much faster on production-scale files.  Use this "
                          "for debugging or when you want to inspect columns "
                          "beyond the audit set."))
+    # ── Timing negative-value exclusion ──────────────────────────────────────
+    p.add_argument("--exclude-negative-time", action="store_true", default=False,
+                   help=(
+                       "For ecin_time, ecout_time, and pcal_time only: after removing "
+                       "the -9999 no-hit sentinel, additionally remove any remaining "
+                       "entries below zero (genuinely-negative non-physical timing "
+                       "values distinct from the sentinel). "
+                       "Histogram lower bound: 1st percentile (np.percentile(combined, 1.0)) "
+                       "of the combined positive-time MC+data distribution, computed after "
+                       "sentinel and negative-value removal (never includes non-positive values). "
+                       "Histogram upper bound: raw max of combined positive-time array; "
+                       "falls back to the 99th percentile if max > 3×p99 (outlier guard). "
+                       "The mode used is recorded in time_range_upper_mode in the CSV. "
+                       "Adds neg_time_frac_removed_mc/data to the CSV (NaN for all "
+                       "non-timing variables). "
+                       "Has no effect on any other variable. Default: off."
+                   ))
     return p
 
 
@@ -648,6 +742,8 @@ def main(argv=None):
     print(f"  Variables   : {variables}")
     print(f"  Output dir  : {outdir}")
     print(f"  Bins        : {args.bins}   Normalize: {not args.no_normalize}")
+    negtime_flag = getattr(args, "exclude_negative_time", False)
+    print(f"  Excl neg-t  : {'YES (ecin_time, ecout_time, pcal_time ≥ 0 only)' if negtime_flag else 'no (default)'}")
     if mc_cols is None:
         print(f"  Columns      : all (--load-all-cols set)")
     else:
@@ -661,6 +757,8 @@ def main(argv=None):
     df_mc_raw   = _load_file(args.mc,   max_rows=args.max_rows, branches=mc_cols)
     print(f"Loading Data: {args.data}")
     df_data_raw = _load_file(args.data, max_rows=args.max_rows, branches=data_cols)
+    n_mc_loaded   = len(df_mc_raw)
+    n_data_loaded = len(df_data_raw)
 
     # ── Filter by species (+ truth match for MC) ───────────────────────────────
     df_mc   = _filter_mc(df_mc_raw,   pid, args.truth_mode)
@@ -723,6 +821,7 @@ def main(argv=None):
         normalize=not args.no_normalize,
         label_mc=lmc,
         label_data=ldata,
+        exclude_negative_time=negtime_flag,
     )
 
     # ── Save CSV ───────────────────────────────────────────────────────────────
@@ -742,13 +841,27 @@ def main(argv=None):
     _write_audit_readme(outdir, pid, label, args.truth_mode,
                         args.mc, args.data, variables,
                         vz_cut_line=vz_cut_line,
-                        extra_cut_lines=extra_cut_lines)
+                        extra_cut_lines=extra_cut_lines,
+                        n_mc_loaded=n_mc_loaded,
+                        n_data_loaded=n_data_loaded,
+                        n_mc_selected=len(df_mc),
+                        n_data_selected=len(df_data),
+                        exclude_negative_time=negtime_flag,
+                        bins=args.bins,
+                        normalize=not args.no_normalize)
 
     # ── Copy COLUMNS.md into the species output directory ──────────────────────
-    columns_src = os.path.join("figures", "feature_audit", "COLUMNS.md")
+    # Source is the canonical scripts/COLUMNS.md, maintained alongside the code.
+    # (The old path figures/feature_audit/COLUMNS.md does not exist in this
+    # checkout; existing copies in figures/feature_audit_week3/ are frozen and
+    # must not be used as an editable source.)
+    columns_src = os.path.join(_SCRIPT_DIR, "COLUMNS.md")
     if os.path.isfile(columns_src):
         shutil.copy(columns_src, os.path.join(outdir, "COLUMNS.md"))
         print(f"  COLUMNS.md copied to: {os.path.join(outdir, 'COLUMNS.md')}")
+    else:
+        print(f"  WARNING: canonical scripts/COLUMNS.md not found at {columns_src}; "
+              f"COLUMNS.md will not be copied to output directory.")
 
     # ── Per-variable summary table ─────────────────────────────────────────────
     print_summary_table(summary, variables)
